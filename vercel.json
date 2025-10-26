@@ -1,8 +1,23 @@
 {
-    "rewrites": [
+    "version": 2,
+    "builds": [
         {
-            "source": "/(.*)",
-            "destination": "/"
+            "src": "client/**",
+            "use": "@vercel/static-build",
+            "config": {
+                "distDir": "dist"
+            }
         }
-    ]
+    ],
+    "routes": [
+        {
+            "src": "/api/(.*)",
+            "dest": "/server/index.ts"
+        },
+        {
+            "src": "/(.*)",
+            "dest": "/client/$1"
+        }
+    ],
+    "outputDirectory": "client/dist"
 }

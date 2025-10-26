@@ -1,17 +1,44 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
-    <meta name="description" content="Sistema de controle de produtos perecíveis com rastreamento de validade e busca automática de produtos por código EAN." />
-    <title>Controle de Perecíveis</title>
-    <link rel="icon" type="image/png" href="/favicon.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+  <meta name="description"
+    content="Sistema de controle de produtos perecíveis com rastreamento de validade e busca automática de produtos por código EAN." />
+  <title>Controle de Perecíveis</title>
+
+  <!-- Favicon básico -->
+  <link rel="icon" type="image/png" href="./public/favicon.png" sizes="48x48" />
+
+  <!-- Favicons para diferentes resoluções -->
+  <link rel="icon" type="image/png" href="./public/icon1.png" sizes="16x16" />
+  <link rel="icon" type="image/png" href="./public/icon2.png" sizes="32x32" />
+
+  <!-- Apple Touch Icon (para iOS/macOS) -->
+  <link rel="apple-touch-icon" href="./public/apple-icon.png" sizes="180x180" />
+
+  <!-- Android Chrome -->
+  <link rel="icon" type="image/png" href="./public/apple-icon.png" sizes="192x192" />
+  <link rel="icon" type="image/png" href="./public/icon2.png" sizes="128x128" />
+
+  <!-- Microsoft Tiles -->
+  <meta name="msapplication-TileImage" content="./public/apple-icon.png" />
+  <meta name="msapplication-TileColor" content="#ffffff" />
+  <meta name="theme-color" content="#ffffff" />
+
+  <!-- Web App Manifest -->
+  <link rel="manifest" href="/manifest.json" />
+
+  <!-- Preconnect para performance -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
 </html>

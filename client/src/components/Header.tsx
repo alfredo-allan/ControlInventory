@@ -21,8 +21,13 @@ export function Header() {
       <div className="container mx-auto px-4">
         <div className="flex h-16 items-center justify-between gap-4">
           <div className="flex items-center gap-2">
+            <img
+              src="../../image/instagran.png"
+              alt="Logo Controle de Perecíveis"
+              className="w-[45px] h-[45px] object-contain"
+            />
             <h1 className="text-xl font-semibold text-foreground">
-              Controle de Perecíveis
+              Controle de Perdas
             </h1>
           </div>
 

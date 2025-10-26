@@ -1,0 +1,82 @@
+🧠 PROMPT COMPLETO PARA O REPLIT (VITE + REACT + TAILWIND + TYPESCRIPT)
+
+Título do projeto:
+
+Controle de Perecíveis - App Web (React + Vite + Tailwind + TS)
+
+Descrição detalhada do que o Replit deve gerar:
+
+Crie um projeto completo Vite + React + Tailwind + TypeScript, com layout moderno, responsivo (mobile e desktop), tema claro/escuro com toggle, e interface baseada em cards e modais, conforme o escopo abaixo:
+
+🎯 OBJETIVO GERAL
+
+Desenvolver um app web para controle de produtos perecíveis de supermercado, com base em uma API pública gratuita (Open Food Facts) para obter a descrição do produto a partir do código EAN.
+
+O app será totalmente client-side nesta fase (sem backend), salvando os registros em LocalStorage, mas com arquitetura limpa para futura integração com API Python.
+
+🧱 STACK E LIBS OBRIGATÓRIAS
+
+Vite + React + TypeScript
+
+TailwindCSS (com dark mode e tema claro alternável via toggle)
+
+Lucide React Icons para ícones
+
+Google Font “Sora”
+
+UI moderna (usar componentes com design limpo e interativo, como Card, Modal, Button, Input, DatePicker, Switch)
+
+Date picker em português (ex: react-day-picker ou react-datepicker com locale pt-BR)
+
+LocalStorage para persistência local
+
+Fetch da API Open Food Facts → https://world.openfoodfacts.org/api/v0/product/{ean}.json?fields=product_name,brands
+
+Loading e animações leves (usando Framer Motion ou classes utilitárias do Tailwind)
+
+Print View simples e legível, estilizada para impressão, com botão “Imprimir Registros”
+
+🧩 ESTRUTURA DE PÁGINAS / COMPONENTES
+1️⃣ Header
+
+Contém o nome do app, o toggle de tema (claro/escuro) e um menu responsivo (hamburger no mobile).
+
+Links:
+
+📝 Registrar
+
+📋 Listar
+
+🔄 Atualizar
+
+❌ Deletar
+
+🐶 Farejar (varredura de vencimentos) — botão com ícone de cachorro farejando.
+
+Ao clicar, mostra um loading animado, depois abre um modal ou página listando itens com vencimento ≤ 3 dias.
+
+2️⃣ Página / Seção “Registrar”
+
+Exibir cards modernos para o formulário de cadastro.
+
+Campos do formulário:
+
+Nome do operador (input texto)
+
+Código de barras (input texto ou numérico)
+
+Ao digitar o EAN → faz requisição para a API Open Food Facts e carrega automaticamente o campo “descrição”.
+
+Descrição (input texto, preenchido automaticamente, mas editável)
+
+Quantidade (input numérico, selecionar tipo: unidade / caixa)
+
+Data de vencimento (com calendário moderno em pt-BR)
+
+Campos ocultos ou automáticos:
+
+data_registro: data atual (horário de São Paulo)
+
+Ao salvar:
+
+Gera um objeto JSON no formato:

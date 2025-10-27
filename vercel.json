@@ -1,8 +1,12 @@
 {
-    "rewrites": [
+    "version": 2,
+    "buildCommand": "cd client && pnpm install && pnpm run build",
+    "outputDirectory": "client/dist",
+    "installCommand": "cd client && pnpm install",
+    "routes": [
         {
-            "source": "/(.*)",
-            "destination": "/"
+            "src": "/(.*)",
+            "dest": "/client/dist/$1"
         }
     ]
 }

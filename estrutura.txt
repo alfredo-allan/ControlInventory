@@ -1,0 +1,43 @@
+.
+├── attached_assets
+│   └── Pasted--PROMPT-COMPLETO-PARA-O-REPLIT-VITE-REACT-TAILWIND-TYPESCRIPT-T-tulo-do-projeto-Control-1761508827822_1761508827822.txt
+├── client
+│   ├── index.html
+│   ├── public
+│   │   ├── apple-icon.png
+│   │   ├── favicon.png
+│   │   ├── icon1.png
+│   │   ├── icon2.png
+│   │   └── image
+│   └── src
+│       ├── App.tsx
+│       ├── components
+│       ├── hooks
+│       ├── index.css
+│       ├── lib
+│       ├── main.tsx
+│       └── pages
+├── components.json
+├── design_guidelines.md
+├── drizzle.config.ts
+├── estrutura.txt
+├── manifest.json
+├── package.json
+├── package-lock.json
+├── pnpm-lock.yaml
+├── pnpm-workspace.yaml
+├── postcss.config.js
+├── replit.md
+├── server
+│   ├── index.ts
+│   ├── routes.ts
+│   ├── storage.ts
+│   └── vite.ts
+├── shared
+│   └── schema.ts
+├── tailwind.config.ts
+├── tsconfig.json
+├── vercel.json
+└── vite.config.ts
+
+12 directories, 29 files

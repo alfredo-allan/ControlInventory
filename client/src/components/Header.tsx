@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 import { Menu, X, Sun, Moon, FileText, List, RefreshCw, Trash2, Dog } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/lib/theme-provider";
+import instaLogo from "@assets/image/instagran.png";
 
 export function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -21,11 +22,7 @@ export function Header() {
       <div className="container mx-auto px-4">
         <div className="flex h-16 items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <img
-              src="/image/instagran.png"
-              alt="Logo Controle de Perecíveis"
-              className="w-[45px] h-[45px] object-contain"
-            />
+            <img src={instaLogo} alt="Logo Controle de Perecíveis" className="w-[45px] h-[45px] object-contain" />
             <h1 className="text-xl font-semibold text-foreground">
               Controle de Perdas
             </h1>

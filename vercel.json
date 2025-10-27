@@ -1,13 +1,12 @@
 {
-    "version": 2,
-    "buildCommand": "pnpm run build:client",
-    "outputDirectory": "client/dist",
-    "installCommand": "pnpm install",
-    "framework": "vite",
-    "routes": [
-        {
-            "src": "/(.*)",
-            "dest": "/client/dist/$1"
-        }
-    ]
+  "version": 2,
+  "buildCommand": "pnpm run build:client",
+  "outputDirectory": "dist/public",
+  "installCommand": "pnpm install",
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/dist/public/$1"
+    }
+  ]
 }

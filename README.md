@@ -131,4 +131,6 @@ yarn build
 /client/dist
 
 5️⃣ Visualizar a build localmente
+
+ npm run preview
 ```

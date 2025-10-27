@@ -97,12 +97,12 @@ export default function UpdatePage() {
   };
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-6xl">
+    <div className="container mx-auto px-4 sm:px-6 py-8 max-w-6xl">
       <div className="mb-8">
-        <h1 className="text-3xl font-semibold text-foreground mb-2">
+        <h1 className="text-2xl sm:text-3xl font-semibold text-foreground mb-2">
           Atualizar Produto
         </h1>
-        <p className="text-muted-foreground">
+        <p className="text-sm sm:text-base text-muted-foreground">
           Busque e atualize as informações de produtos cadastrados
         </p>
       </div>
@@ -119,7 +119,7 @@ export default function UpdatePage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Digite para buscar..."
-              className="pl-10"
+              className="pl-10 w-full"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               data-testid="input-search"
@@ -130,25 +130,25 @@ export default function UpdatePage() {
 
       {filteredProducts.length === 0 ? (
         <Card>
-          <CardContent className="flex flex-col items-center justify-center py-16">
+          <CardContent className="flex flex-col items-center justify-center py-16 px-4 sm:px-6">
             <Package className="h-16 w-16 text-muted-foreground mb-4" />
-            <h3 className="text-xl font-medium text-foreground mb-2">
+            <h3 className="text-lg sm:text-xl font-medium text-foreground mb-2 text-center">
               {searchTerm ? "Nenhum produto encontrado" : "Nenhum produto cadastrado"}
             </h3>
-            <p className="text-muted-foreground text-center">
-              {searchTerm 
-                ? "Tente buscar com outros termos" 
+            <p className="text-sm sm:text-base text-muted-foreground text-center">
+              {searchTerm
+                ? "Tente buscar com outros termos"
                 : "Registre produtos para poder atualizá-los"}
             </p>
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {filteredProducts.map((product) => (
             <Card key={product.id} className="hover-elevate" data-testid={`card-product-${product.id}`}>
               <CardHeader>
-                <div className="flex items-start justify-between gap-2">
-                  <CardTitle className="text-lg line-clamp-2">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                  <CardTitle className="text-base sm:text-lg line-clamp-2">
                     {product.description}
                   </CardTitle>
                   <Badge variant="outline" className="shrink-0">
@@ -157,8 +157,8 @@ export default function UpdatePage() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-2">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Barcode className="h-4 w-4" />
+                <div className="flex items-center gap-2 text-sm">
+                  <Barcode className="h-4 w-4 text-muted-foreground" />
                   <span className="font-mono">{product.eanCode}</span>
                 </div>
                 <div className="flex items-center gap-2 text-sm">
@@ -190,7 +190,7 @@ export default function UpdatePage() {
       )}
 
       <Dialog open={!!selectedProduct} onOpenChange={() => setSelectedProduct(null)}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-full sm:max-w-2xl max-h-[90vh] overflow-y-auto px-4 sm:px-6">
           <DialogHeader>
             <DialogTitle>Editar Produto</DialogTitle>
             <DialogDescription>
@@ -207,14 +207,14 @@ export default function UpdatePage() {
                   <FormItem>
                     <FormLabel>Nome do Operador</FormLabel>
                     <FormControl>
-                      <Input placeholder="Digite seu nome" data-testid="input-edit-operator-name" {...field} />
+                      <Input placeholder="Digite seu nome" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <FormField
                   control={form.control}
                   name="eanCode"
@@ -222,7 +222,7 @@ export default function UpdatePage() {
                     <FormItem>
                       <FormLabel>Código EAN</FormLabel>
                       <FormControl>
-                        <Input placeholder="Ex: 7891234567890" data-testid="input-edit-ean-code" {...field} />
+                        <Input placeholder="Ex: 7891234567890" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -236,7 +236,7 @@ export default function UpdatePage() {
                     <FormItem>
                       <FormLabel>Descrição</FormLabel>
                       <FormControl>
-                        <Input placeholder="Descrição do produto" data-testid="input-edit-description" {...field} />
+                        <Input placeholder="Descrição do produto" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -244,7 +244,7 @@ export default function UpdatePage() {
                 />
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <FormField
                   control={form.control}
                   name="quantity"
@@ -255,7 +255,6 @@ export default function UpdatePage() {
                         <Input
                           type="number"
                           min="1"
-                          data-testid="input-edit-quantity"
                           {...field}
                           onChange={(e) => field.onChange(parseInt(e.target.value))}
                         />
@@ -273,7 +272,7 @@ export default function UpdatePage() {
                       <FormLabel>Tipo</FormLabel>
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
-                          <SelectTrigger data-testid="select-edit-quantity-type">
+                          <SelectTrigger>
                             <SelectValue />
                           </SelectTrigger>
                         </FormControl>
@@ -300,14 +299,8 @@ export default function UpdatePage() {
                           <Button
                             variant="outline"
                             className="w-full justify-start text-left font-normal"
-                            data-testid="button-edit-expiration-date"
                           >
-                            <Calendar className="mr-2 h-4 w-4" />
-                            {date ? (
-                              format(date, "PPP", { locale: ptBR })
-                            ) : (
-                              <span className="text-muted-foreground">Selecione a data</span>
-                            )}
+                            {date ? format(date, "PPP", { locale: ptBR }) : <span className="text-muted-foreground">Selecione a data</span>}
                           </Button>
                         </FormControl>
                       </PopoverTrigger>
@@ -329,17 +322,16 @@ export default function UpdatePage() {
                 )}
               />
 
-              <div className="flex gap-2 pt-4">
+              <div className="flex flex-col sm:flex-row gap-2 pt-4">
                 <Button
                   type="button"
                   variant="outline"
                   className="flex-1"
                   onClick={() => setSelectedProduct(null)}
-                  data-testid="button-cancel-edit"
                 >
                   Cancelar
                 </Button>
-                <Button type="submit" className="flex-1" data-testid="button-save-edit">
+                <Button type="submit" className="flex-1">
                   Salvar Alterações
                 </Button>
               </div>

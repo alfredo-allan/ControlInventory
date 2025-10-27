@@ -46,7 +46,7 @@ export default function RegisterPage() {
         const productName = data.product.product_name || "";
         const brands = data.product.brands || "";
         const description = brands ? `${brands} - ${productName}` : productName;
-        
+
         if (description) {
           form.setValue("description", description);
           toast({
@@ -150,6 +150,9 @@ export default function RegisterPage() {
                         <div className="relative">
                           <Barcode className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                           <Input
+                            type="number"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
                             placeholder="Ex: 7891234567890"
                             className="pl-10"
                             data-testid="input-ean-code"
@@ -166,6 +169,7 @@ export default function RegisterPage() {
                       </FormControl>
                       <FormMessage />
                     </FormItem>
+
                   )}
                 />
 

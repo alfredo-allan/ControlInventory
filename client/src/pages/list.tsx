@@ -129,32 +129,21 @@ export default function ListPage() {
                     Registrado em: {format(parseISO(product.registrationDate), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
                   </div>
                 </CardContent>
-                <CardFooter
-                  className="
-    flex 
-    flex-wrap
-    justify-center 
-    gap-[15px] 
-    sm:justify-between 
-    sm:flex-row 
-    print:hidden
-  "
-                >
+                <CardFooter className="flex flex-row gap-2 print:hidden">
                   <Button
                     variant="outline"
                     size="sm"
-                    className="flex items-center justify-center gap-2 w-full sm:w-[48%]"
+                    className="flex-1 gap-2"
                     onClick={() => setLocation("/atualizar")}
                     data-testid={`button-edit-${product.id}`}
                   >
                     <Edit2 className="h-4 w-4 sm:h-5 sm:w-5" />
                     Editar
                   </Button>
-
                   <Button
                     variant="destructive"
                     size="sm"
-                    className="flex items-center justify-center gap-2 w-full sm:w-[48%]"
+                    className="flex-1 gap-2"
                     onClick={() => setLocation("/deletar")}
                     data-testid={`button-delete-${product.id}`}
                   >
@@ -162,7 +151,6 @@ export default function ListPage() {
                     Excluir
                   </Button>
                 </CardFooter>
-
               </Card>
             );
           })}

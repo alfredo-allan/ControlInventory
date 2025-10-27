@@ -1,15 +1,12 @@
 {
     "version": 2,
-    "builds": [
-        {
-            "src": "dist/public/index.html",
-            "use": "@vercel/static"
-        }
-    ],
+    "buildCommand": "pnpm run build:client",
+    "outputDirectory": "dist/public",
+    "installCommand": "pnpm install",
     "routes": [
         {
             "src": "/(.*)",
-            "dest": "/dist/public/$1"
+            "dest": "/index.html"
         }
     ]
 }

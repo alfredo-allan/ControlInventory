@@ -1,13 +1,8 @@
 {
     "version": 2,
-    "buildCommand": "pnpm run build:client",
-    "outputDirectory": "client/dist",
-    "installCommand": "pnpm install",
-    "framework": "vite",
-    "routes": [
-        {
-            "src": "/(.*)",
-            "dest": "/client/dist/$1"
-        }
-    ]
+    "framework": "nextjs",
+    "buildCommand": "yarn build",
+    "devCommand": "yarn dev",
+    "installCommand": "yarn install",
+    "outputDirectory": ".next"
 }

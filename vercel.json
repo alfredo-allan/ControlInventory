@@ -1,12 +1,8 @@
 {
-    "version": 2,
-    "buildCommand": "npm run build:client",
-    "outputDirectory": "dist/public",
-    "installCommand": "npm install",
-    "routes": [
+    "rewrites": [
         {
-            "src": "/(.*)",
-            "dest": "/dist/public/$1"
+            "source": "/(.*)",
+            "destination": "/"
         }
     ]
 }

@@ -191,6 +191,17 @@ export default function RegisterPage() {
 
   // Verificar e solicitar permissões da câmera
   const requestCameraPermission = async (): Promise<boolean> => {
+    // Verificar se a API está disponível
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      toast({
+        title: "Câmera não disponível",
+        description:
+          "Use HTTPS ou localhost para acessar a câmera. Você pode digitar o código manualmente.",
+        variant: "destructive",
+      });
+      return false;
+    }
+
     try {
       console.log("🎥 Solicitando permissão da câmera...");
 
@@ -230,6 +241,12 @@ export default function RegisterPage() {
       } else if (error.name === "OverconstrainedError") {
         errorMessage =
           "Câmera traseira não disponível. Tentando câmera frontal...";
+      } else if (
+        error.name === "NotSupportedError" ||
+        error.name === "TypeError"
+      ) {
+        errorMessage =
+          "Acesso à câmera requer HTTPS. Use localhost ou digite o código manualmente.";
       }
 
       toast({
@@ -417,61 +434,28 @@ export default function RegisterPage() {
                 )}
               />
 
-              {/* Grid: Descrição + Imagem */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Descrição do Produto */}
-                <FormField
-                  control={form.control}
-                  name="description"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Descrição do Produto</FormLabel>
-                      <FormControl>
-                        <div className="relative">
-                          <Package className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                          <Input
-                            placeholder="Será preenchido automaticamente"
-                            className="pl-10"
-                            data-testid="input-description"
-                            {...field}
-                          />
-                        </div>
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                {/* Preview da Imagem */}
-                <div className="space-y-2">
-                  <FormLabel>Imagem do Produto</FormLabel>
-                  <div className="border-2 border-dashed border-muted-foreground/25 rounded-lg p-4 flex items-center justify-center min-h-[120px]">
-                    {productImage ? (
-                      <div className="relative group">
-                        <img
-                          src={productImage}
-                          alt="Preview do produto"
-                          className="max-h-24 max-w-full object-contain rounded"
+              {/* Descrição do Produto */}
+              <FormField
+                control={form.control}
+                name="description"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Descrição do Produto</FormLabel>
+                    <FormControl>
+                      <div className="relative">
+                        <Package className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          placeholder="Será preenchido automaticamente"
+                          className="pl-10"
+                          data-testid="input-description"
+                          {...field}
                         />
-                        <Button
-                          type="button"
-                          variant="destructive"
-                          size="icon"
-                          className="absolute -top-2 -right-2 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                          onClick={clearProductImage}
-                        >
-                          <X className="h-3 w-3" />
-                        </Button>
                       </div>
-                    ) : (
-                      <div className="text-center text-muted-foreground">
-                        <ImageIcon className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                        <p className="text-sm">Imagem aparecerá aqui</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
               {/* Quantidade e Tipo */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

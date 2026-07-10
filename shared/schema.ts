@@ -10,7 +10,12 @@ export const productSchema = z.object({
   quantityType: z.enum(["unidade", "caixa"]),
   expirationDate: z.string(), // ISO date string
   registrationDate: z.string(), // ISO date string in São Paulo timezone
-  imageUrl: z.string().optional(), // NOVO: URL da imagem do produto
+  imageUrl: z.string().optional(), // URL da imagem do produto
+
+  // Cliente/Mercado atendido nesse registro — agora fazem parte da entidade
+  // principal, e não só do formulário, para aparecerem em list.tsx e afins.
+  nomeCliente: z.string().min(1, "O nome do mercado/cliente é obrigatório"),
+  enderecoCliente: z.string().min(1, "O endereço é obrigatório"),
 });
 
 export const insertProductSchema = productSchema.omit({
@@ -21,13 +26,13 @@ export const insertProductSchema = productSchema.omit({
 export type Product = z.infer<typeof productSchema>;
 export type InsertProduct = z.infer<typeof insertProductSchema>;
 
-// Open Food Facts API response type - ATUALIZADO
+// Open Food Facts API response type
 export interface OpenFoodFactsProduct {
   product_name?: string;
   brands?: string;
-  image_url?: string; // NOVO: campo da imagem
-  image_front_url?: string; // NOVO: alternativa comum
-  image_front_small_url?: string; // NOVO: versão pequena
+  image_url?: string;
+  image_front_url?: string;
+  image_front_small_url?: string;
 }
 
 export interface OpenFoodFactsResponse {
@@ -35,9 +40,15 @@ export interface OpenFoodFactsResponse {
   product?: OpenFoodFactsProduct;
 }
 
-// NOVO: Tipo para o cache de imagens
+// Tipo para o cache de imagens
 export interface ImageCache {
   url: string;
   timestamp: number;
   ean: string;
 }
+
+// productFormSchema agora é idêntico ao insertProductSchema, já que
+// nomeCliente/enderecoCliente vieram para a entidade principal. Mantido
+// como alias separado para não quebrar os imports existentes no formulário.
+export const productFormSchema = insertProductSchema;
+export type ProductFormValues = z.infer<typeof productFormSchema>;

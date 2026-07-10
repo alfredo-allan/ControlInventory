@@ -494,7 +494,13 @@ export default function RegisterPage() {
                           placeholder="1"
                           data-testid="input-quantity"
                           {...field}
-                          onChange={(e) => field.onChange(parseInt(e.target.value) || 1)}
+                          value={Number.isNaN(field.value) ? '' : field.value}
+                          onChange={(e) => {
+                            const rawValue = e.target.value
+                            // Deixa o campo vazio de verdade enquanto o usuário digita/apaga.
+                            // Forçar fallback pra 1 a cada tecla é o que travava o input.
+                            field.onChange(rawValue === '' ? NaN : parseInt(rawValue, 10))
+                          }}
                         />
                       </FormControl>
                       <FormMessage />

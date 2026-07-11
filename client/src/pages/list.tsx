@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -9,16 +9,49 @@ import { toZonedTime } from 'date-fns-tz'
 import type { Product } from '@shared/schema'
 import { productStorage } from '@/lib/localStorage'
 import { useLocation } from 'wouter'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 const SAO_PAULO_TZ = 'America/Sao_Paulo'
+const TODOS_CLIENTES = '__todos__'
+
+// Identidade única do cliente: nome + endereço juntos.
+// Evita misturar dois mercados que por acaso tenham nome parecido
+// mas sejam endereços/unidades diferentes.
+const getClienteKey = (product: Product) => `${product.nomeCliente ?? ''}|${product.enderecoCliente ?? ''}`
 
 export default function ListPage() {
   const [products, setProducts] = useState<Product[]>([])
+  const [clienteSelecionado, setClienteSelecionado] = useState<string>(TODOS_CLIENTES)
   const [, setLocation] = useLocation()
 
   useEffect(() => {
     setProducts(productStorage.getAll())
   }, [])
+
+  // Lista de clientes únicos (nome + endereço) presentes nos produtos cadastrados
+  const clientesUnicos = useMemo(() => {
+    const mapa = new Map<string, { key: string; nomeCliente: string; enderecoCliente: string }>()
+
+    products.forEach((product) => {
+      const key = getClienteKey(product)
+      if (!mapa.has(key)) {
+        mapa.set(key, {
+          key,
+          nomeCliente: product.nomeCliente || 'Cliente não informado',
+          enderecoCliente: product.enderecoCliente || 'Endereço não informado'
+        })
+      }
+    })
+
+    return Array.from(mapa.values())
+  }, [products])
+
+  // Produtos filtrados pelo cliente selecionado — usados tanto na
+  // exibição dos cards quanto na geração do relatório
+  const filteredProducts = useMemo(() => {
+    if (clienteSelecionado === TODOS_CLIENTES) return products
+    return products.filter((product) => getClienteKey(product) === clienteSelecionado)
+  }, [products, clienteSelecionado])
 
   const getExpiryStatus = (expirationDate: string) => {
     const nowInSaoPaulo = toZonedTime(new Date(), SAO_PAULO_TZ)
@@ -41,8 +74,23 @@ export default function ListPage() {
     return type === 'caixa' ? 'cx' : 'un'
   }
 
+  // Slug simples pro nome do arquivo, a partir do nome do cliente selecionado
+  const getClienteSlug = () => {
+    if (clienteSelecionado === TODOS_CLIENTES) return 'todos-clientes'
+
+    const cliente = clientesUnicos.find((c) => c.key === clienteSelecionado)
+    if (!cliente) return 'cliente'
+
+    return cliente.nomeCliente
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // remove acentos
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '')
+  }
+
   const handleDownloadList = () => {
-    const blocos = products.map((product) => {
+    const blocos = filteredProducts.map((product) => {
       return [
         `Promotor : ${product.operatorName}`,
         `Cliente : ${product.nomeCliente || 'Não informado'}`,
@@ -61,7 +109,7 @@ export default function ListPage() {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `registros-${format(new Date(), 'dd-MM-yyyy-HHmm')}.txt`
+    link.download = `registros-${getClienteSlug()}-${format(new Date(), 'dd-MM-yyyy-HHmm')}.txt`
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
@@ -75,28 +123,56 @@ export default function ListPage() {
           <h1 className="text-2xl sm:text-3xl font-semibold text-foreground mb-1 sm:mb-2">Lista de Produtos</h1>
           <p className="text-sm sm:text-base text-muted-foreground">Todos os produtos perecíveis cadastrados</p>
         </div>
-        <Button
-          onClick={handleDownloadList}
-          variant="outline"
-          className="gap-2 mt-2 sm:mt-0"
-          data-testid="button-download-list"
-          disabled={products.length === 0}>
-          <Download className="h-4 w-4 sm:h-5 sm:w-5" />
-          Baixar Lista
-        </Button>
+
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+          <Select value={clienteSelecionado} onValueChange={setClienteSelecionado}>
+            <SelectTrigger className="w-full sm:w-[260px]" data-testid="select-cliente-filtro">
+              <SelectValue placeholder="Filtrar por cliente" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={TODOS_CLIENTES}>Todos os clientes</SelectItem>
+              {clientesUnicos.map((cliente) => (
+                <SelectItem key={cliente.key} value={cliente.key}>
+                  {cliente.nomeCliente}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Button
+            onClick={handleDownloadList}
+            variant="outline"
+            className="gap-2"
+            data-testid="button-download-list"
+            disabled={filteredProducts.length === 0}>
+            <Download className="h-4 w-4 sm:h-5 sm:w-5" />
+            Baixar Lista
+          </Button>
+        </div>
       </div>
 
-      {products.length === 0 ? (
+      {clienteSelecionado !== TODOS_CLIENTES && (
+        <p className="mb-4 text-sm text-muted-foreground">
+          Mostrando {filteredProducts.length} produto{filteredProducts.length !== 1 ? 's' : ''} de{' '}
+          <span className="font-medium text-foreground">{clientesUnicos.find((c) => c.key === clienteSelecionado)?.nomeCliente}</span>
+        </p>
+      )}
+
+      {filteredProducts.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12 sm:py-16">
             <Package className="h-16 w-16 sm:h-20 sm:w-20 text-muted-foreground mb-3 sm:mb-4" />
-            <h3 className="text-lg sm:text-xl font-medium text-foreground mb-1 sm:mb-2 text-center">Nenhum produto cadastrado</h3>
-            <p className="text-sm sm:text-base text-muted-foreground text-center">Comece registrando seu primeiro produto perecível</p>
+            <h3 className="text-lg sm:text-xl font-medium text-foreground mb-1 sm:mb-2 text-center">
+              {products.length === 0 ? 'Nenhum produto cadastrado' : 'Nenhum produto para esse cliente'}
+            </h3>
+            <p className="text-sm sm:text-base text-muted-foreground text-center">
+              {products.length === 0 ? 'Comece registrando seu primeiro produto perecível' : 'Escolha outro cliente no filtro acima'}
+            </p>
           </CardContent>
         </Card>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-          {products.map((product) => {
+          {filteredProducts.map((product) => {
             const expiryStatus = getExpiryStatus(product.expirationDate)
 
             return (

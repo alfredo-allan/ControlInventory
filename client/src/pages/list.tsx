@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Edit2, Trash2, Package, Calendar, User, Barcode, Download, Store, MapPin } from 'lucide-react'
 import { format, differenceInDays, parseISO } from 'date-fns'
@@ -10,6 +11,15 @@ import type { Product } from '@shared/schema'
 import { productStorage } from '@/lib/localStorage'
 import { useLocation } from 'wouter'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Calendar as CalendarComponent } from '@/components/ui/calendar'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { insertProductSchema, type InsertProduct } from '@shared/schema'
+import { useToast } from '@/hooks/use-toast'
+import { MarketAutocomplete } from '@/components/market-autocomplete'
 
 const SAO_PAULO_TZ = 'America/Sao_Paulo'
 const TODOS_CLIENTES = '__todos__'
@@ -20,9 +30,26 @@ const TODOS_CLIENTES = '__todos__'
 const getClienteKey = (product: Product) => `${product.nomeCliente ?? ''}|${product.enderecoCliente ?? ''}`
 
 export default function ListPage() {
+  const { toast } = useToast()
   const [products, setProducts] = useState<Product[]>([])
   const [clienteSelecionado, setClienteSelecionado] = useState<string>(TODOS_CLIENTES)
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
+  const [editDate, setEditDate] = useState<Date>()
   const [, setLocation] = useLocation()
+
+  const form = useForm<InsertProduct>({
+    resolver: zodResolver(insertProductSchema),
+    defaultValues: {
+      operatorName: '',
+      eanCode: '',
+      description: '',
+      quantity: 1,
+      quantityType: 'unidade',
+      expirationDate: '',
+      nomeCliente: '',
+      enderecoCliente: ''
+    }
+  })
 
   useEffect(() => {
     setProducts(productStorage.getAll())
@@ -114,6 +141,53 @@ export default function ListPage() {
     link.click()
     document.body.removeChild(link)
     URL.revokeObjectURL(url)
+  }
+
+  // Abre o modal de edição já preenchido com os dados do produto clicado —
+  // não navega mais pra outra página
+  const handleEditClick = (product: Product) => {
+    setSelectedProduct(product)
+    form.reset({
+      operatorName: product.operatorName,
+      eanCode: product.eanCode,
+      description: product.description,
+      quantity: product.quantity,
+      quantityType: product.quantityType,
+      expirationDate: product.expirationDate,
+      nomeCliente: product.nomeCliente ?? '',
+      enderecoCliente: product.enderecoCliente ?? ''
+    })
+    setEditDate(parseISO(product.expirationDate))
+  }
+
+  const onEditSubmit = (data: InsertProduct) => {
+    if (!selectedProduct) return
+
+    try {
+      const updatedProduct = productStorage.update(selectedProduct.id, data)
+      if (updatedProduct) {
+        toast({
+          title: 'Produto atualizado!',
+          description: `${updatedProduct.description} foi atualizado com sucesso.`
+        })
+        setProducts(productStorage.getAll())
+        setSelectedProduct(null)
+        form.reset()
+        setEditDate(undefined)
+      } else {
+        toast({
+          title: 'Erro ao atualizar',
+          description: 'Produto não encontrado.',
+          variant: 'destructive'
+        })
+      }
+    } catch (error) {
+      toast({
+        title: 'Erro ao atualizar',
+        description: 'Não foi possível atualizar o produto. Tente novamente.',
+        variant: 'destructive'
+      })
+    }
   }
 
   return (
@@ -237,7 +311,7 @@ export default function ListPage() {
                     variant="outline"
                     size="sm"
                     className="flex-1 gap-2"
-                    onClick={() => setLocation('/atualizar')}
+                    onClick={() => handleEditClick(product)}
                     data-testid={`button-edit-${product.id}`}>
                     <Edit2 className="h-4 w-4 sm:h-5 sm:w-5" />
                     Editar
@@ -257,6 +331,182 @@ export default function ListPage() {
           })}
         </div>
       )}
+
+      {/* Modal de edição embutido — não depende mais de navegar pro Farejar */}
+      <Dialog open={!!selectedProduct} onOpenChange={() => setSelectedProduct(null)}>
+        <DialogContent className="max-w-full sm:max-w-2xl max-h-[90vh] overflow-y-auto px-4 sm:px-6">
+          <DialogHeader>
+            <DialogTitle>Editar Produto</DialogTitle>
+            <DialogDescription>Atualize as informações do produto abaixo</DialogDescription>
+          </DialogHeader>
+
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onEditSubmit)} className="space-y-4">
+              <FormField
+                control={form.control}
+                name="operatorName"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Nome do Operador</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Digite seu nome" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="nomeCliente"
+                render={() => (
+                  <FormItem className="flex flex-col">
+                    <FormLabel>Nome do Cliente / Mercado</FormLabel>
+                    <MarketAutocomplete />
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="enderecoCliente"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Endereço do Cliente</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Preenchido automaticamente ao selecionar o mercado" {...field} className="bg-muted/30" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="eanCode"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Código EAN</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Ex: 7891234567890" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="description"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Descrição</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Descrição do produto" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="quantity"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Quantidade</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          min="1"
+                          {...field}
+                          value={Number.isNaN(field.value) ? '' : field.value}
+                          onChange={(e) => {
+                            const rawValue = e.target.value
+                            field.onChange(rawValue === '' ? NaN : parseInt(rawValue, 10))
+                          }}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="quantityType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Tipo</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="unidade">Unidade</SelectItem>
+                          <SelectItem value="caixa">Caixa</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <FormField
+                control={form.control}
+                name="expirationDate"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Data de Vencimento</FormLabel>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <FormControl>
+                          <Button variant="outline" className="w-full justify-start text-left font-normal">
+                            {editDate ? (
+                              format(editDate, 'PPP', { locale: ptBR })
+                            ) : (
+                              <span className="text-muted-foreground">Selecione a data</span>
+                            )}
+                          </Button>
+                        </FormControl>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <CalendarComponent
+                          mode="single"
+                          selected={editDate}
+                          onSelect={(newDate) => {
+                            setEditDate(newDate)
+                            field.onChange(newDate?.toISOString() || '')
+                          }}
+                          locale={ptBR}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <div className="flex flex-col sm:flex-row gap-2 pt-4">
+                <Button type="button" variant="outline" className="flex-1" onClick={() => setSelectedProduct(null)}>
+                  Cancelar
+                </Button>
+                <Button type="submit" className="flex-1">
+                  Salvar Alterações
+                </Button>
+              </div>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

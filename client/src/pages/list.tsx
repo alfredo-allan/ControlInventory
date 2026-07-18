@@ -3,15 +3,24 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { Edit2, Trash2, Package, Calendar, User, Barcode, Download, Store, MapPin } from 'lucide-react'
+import { Edit2, Trash2, Package, Calendar, User, Barcode, Download, Store, MapPin, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import { format, differenceInDays, parseISO } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { toZonedTime } from 'date-fns-tz'
 import type { Product } from '@shared/schema'
 import { productStorage } from '@/lib/localStorage'
-import { useLocation } from 'wouter'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from '@/components/ui/alert-dialog'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Calendar as CalendarComponent } from '@/components/ui/calendar'
@@ -35,7 +44,8 @@ export default function ListPage() {
   const [clienteSelecionado, setClienteSelecionado] = useState<string>(TODOS_CLIENTES)
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [editDate, setEditDate] = useState<Date>()
-  const [, setLocation] = useLocation()
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null)
+  const [deletedProduct, setDeletedProduct] = useState<Product | null>(null)
 
   const form = useForm<InsertProduct>({
     resolver: zodResolver(insertProductSchema),
@@ -190,6 +200,41 @@ export default function ListPage() {
     }
   }
 
+  // Passo 1: abre o modal de confirmação (sim/não) — não exclui nada ainda
+  const handleDeleteClick = (product: Product) => {
+    setProductToDelete(product)
+  }
+
+  // Passo 2: usuário confirmou no modal — executa a exclusão de fato
+  const handleConfirmDelete = () => {
+    if (!productToDelete) return
+
+    try {
+      const success = productStorage.delete(productToDelete.id)
+      if (success) {
+        setProducts(productStorage.getAll())
+        // Guarda uma cópia do produto excluído pra mostrar no modal de resposta,
+        // já que productToDelete vai ser limpo a seguir
+        setDeletedProduct(productToDelete)
+        setProductToDelete(null)
+      } else {
+        toast({
+          title: 'Erro ao excluir',
+          description: 'Produto não encontrado.',
+          variant: 'destructive'
+        })
+        setProductToDelete(null)
+      }
+    } catch (error) {
+      toast({
+        title: 'Erro ao excluir',
+        description: 'Não foi possível excluir o produto. Tente novamente.',
+        variant: 'destructive'
+      })
+      setProductToDelete(null)
+    }
+  }
+
   return (
     <div className="container mx-auto px-4 py-6 sm:py-8 max-w-full sm:max-w-3xl md:max-w-7xl">
       <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row flex-wrap items-start sm:items-center justify-between gap-2 sm:gap-4">
@@ -320,7 +365,7 @@ export default function ListPage() {
                     variant="destructive"
                     size="sm"
                     className="flex-1 gap-2"
-                    onClick={() => setLocation('/deletar')}
+                    onClick={() => handleDeleteClick(product)}
                     data-testid={`button-delete-${product.id}`}>
                     <Trash2 className="h-4 w-4 sm:h-5 sm:w-5" />
                     Excluir
@@ -332,7 +377,7 @@ export default function ListPage() {
         </div>
       )}
 
-      {/* Modal de edição embutido — não depende mais de navegar pro Farejar */}
+      {/* Modal de edição embutido */}
       <Dialog open={!!selectedProduct} onOpenChange={() => setSelectedProduct(null)}>
         <DialogContent className="max-w-full sm:max-w-2xl max-h-[90vh] overflow-y-auto px-4 sm:px-6">
           <DialogHeader>
@@ -507,6 +552,75 @@ export default function ListPage() {
           </Form>
         </DialogContent>
       </Dialog>
+
+      {/* Passo 1: Modal de confirmação (sim/não) — mesma identidade visual do DeletePage */}
+      <AlertDialog open={!!productToDelete} onOpenChange={() => setProductToDelete(null)}>
+        <AlertDialogContent className="w-full max-w-sm mx-auto sm:max-w-md">
+          <AlertDialogHeader>
+            <div className="flex items-center gap-2 sm:gap-3 mb-2">
+              <div className="flex h-8 w-8 sm:h-10 sm:w-10 items-center justify-center rounded-lg bg-destructive/10">
+                <AlertTriangle className="h-4 w-4 sm:h-5 sm:w-5 text-destructive" />
+              </div>
+              <AlertDialogTitle className="text-sm sm:text-base">Confirmar Exclusão</AlertDialogTitle>
+            </div>
+            <AlertDialogDescription className="space-y-2 text-sm sm:text-base">
+              <p>Tem certeza que deseja excluir este produto?</p>
+              {productToDelete && (
+                <div className="mt-2 sm:mt-4 p-2 sm:p-3 rounded-md bg-muted space-y-1">
+                  <p className="font-medium text-foreground text-sm sm:text-base">{productToDelete.description}</p>
+                  <p className="text-xs sm:text-sm text-muted-foreground">Cliente: {productToDelete.nomeCliente || 'Não informado'}</p>
+                  <p className="text-xs sm:text-sm text-muted-foreground">EAN: {productToDelete.eanCode}</p>
+                  <p className="text-xs sm:text-sm text-muted-foreground">
+                    Quantidade: {productToDelete.quantity} {productToDelete.quantityType}
+                    {productToDelete.quantity > 1 ? 's' : ''}
+                  </p>
+                </div>
+              )}
+              <p className="text-destructive font-medium mt-2 sm:mt-4 text-sm sm:text-base">Esta ação não pode ser desfeita.</p>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex flex-col sm:flex-row sm:justify-end gap-2 sm:gap-3">
+            <AlertDialogCancel data-testid="button-cancel-delete" className="w-full sm:w-auto">
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="w-full sm:w-auto bg-destructive text-destructive-foreground hover-elevate"
+              data-testid="button-confirm-delete">
+              Deletar Produto
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Passo 2: Modal de resposta confirmando que a exclusão foi concluída */}
+      <AlertDialog open={!!deletedProduct} onOpenChange={() => setDeletedProduct(null)}>
+        <AlertDialogContent className="w-full max-w-sm mx-auto sm:max-w-md">
+          <AlertDialogHeader>
+            <div className="flex items-center gap-2 sm:gap-3 mb-2">
+              <div className="flex h-8 w-8 sm:h-10 sm:w-10 items-center justify-center rounded-lg bg-emerald-500/10">
+                <CheckCircle2 className="h-4 w-4 sm:h-5 sm:w-5 text-emerald-600" />
+              </div>
+              <AlertDialogTitle className="text-sm sm:text-base">Produto Excluído</AlertDialogTitle>
+            </div>
+            <AlertDialogDescription className="text-sm sm:text-base">
+              {deletedProduct && (
+                <>
+                  <span className="font-medium text-foreground">{deletedProduct.description}</span> foi removido do sistema com sucesso.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction
+              onClick={() => setDeletedProduct(null)}
+              className="w-full sm:w-auto"
+              data-testid="button-close-delete-confirmation">
+              OK
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,12 +16,21 @@ import {
   AlertDialogHeader,
   AlertDialogTitle
 } from '@/components/ui/alert-dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { productStorage } from '@/lib/localStorage'
+
+const TODOS_CLIENTES = '__todos__'
+
+// Identidade única do cliente: nome + endereço juntos, mesmo critério
+// usado no ListPage — evita misturar mercados com nome parecido
+// mas endereço/unidade diferente.
+const getClienteKey = (product: Product) => `${product.nomeCliente ?? ''}|${product.enderecoCliente ?? ''}`
 
 export default function DeletePage() {
   const { toast } = useToast()
   const [searchTerm, setSearchTerm] = useState('')
+  const [clienteSelecionado, setClienteSelecionado] = useState<string>(TODOS_CLIENTES)
   const [products, setProducts] = useState<Product[]>([])
   const [productToDelete, setProductToDelete] = useState<Product | null>(null)
 
@@ -29,13 +38,34 @@ export default function DeletePage() {
     setProducts(productStorage.getAll())
   }, [])
 
-  const filteredProducts = products.filter(
-    (product) =>
+  // Lista de clientes únicos (nome + endereço) presentes nos produtos cadastrados
+  const clientesUnicos = useMemo(() => {
+    const mapa = new Map<string, { key: string; nomeCliente: string }>()
+
+    products.forEach((product) => {
+      const key = getClienteKey(product)
+      if (!mapa.has(key)) {
+        mapa.set(key, {
+          key,
+          nomeCliente: product.nomeCliente || 'Cliente não informado'
+        })
+      }
+    })
+
+    return Array.from(mapa.values())
+  }, [products])
+
+  const filteredProducts = products.filter((product) => {
+    const matchesSearch =
       product.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
       product.eanCode.includes(searchTerm) ||
       product.operatorName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (product.nomeCliente ?? '').toLowerCase().includes(searchTerm.toLowerCase())
-  )
+
+    const matchesCliente = clienteSelecionado === TODOS_CLIENTES || getClienteKey(product) === clienteSelecionado
+
+    return matchesSearch && matchesCliente
+  })
 
   const handleDeleteConfirm = () => {
     if (!productToDelete) return
@@ -75,18 +105,36 @@ export default function DeletePage() {
       <Card className="mb-4 sm:mb-6">
         <CardHeader>
           <CardTitle className="text-lg sm:text-xl">Buscar Produto</CardTitle>
-          <CardDescription className="text-sm sm:text-base">Pesquise por descrição, código EAN, operador ou cliente</CardDescription>
+          <CardDescription className="text-sm sm:text-base">
+            Pesquise por descrição, código EAN, operador ou cliente — ou filtre direto por cliente
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="relative w-full">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Digite para buscar..."
-              className="w-full pl-10"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              data-testid="input-search"
-            />
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="relative w-full">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Digite para buscar..."
+                className="w-full pl-10"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                data-testid="input-search"
+              />
+            </div>
+
+            <Select value={clienteSelecionado} onValueChange={setClienteSelecionado}>
+              <SelectTrigger className="w-full sm:w-[260px] shrink-0" data-testid="select-cliente-filtro">
+                <SelectValue placeholder="Filtrar por cliente" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={TODOS_CLIENTES}>Todos os clientes</SelectItem>
+                {clientesUnicos.map((cliente) => (
+                  <SelectItem key={cliente.key} value={cliente.key}>
+                    {cliente.nomeCliente}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </CardContent>
       </Card>
@@ -96,10 +144,12 @@ export default function DeletePage() {
           <CardContent className="flex flex-col items-center justify-center py-12 sm:py-16">
             <Package className="h-16 w-16 text-muted-foreground mb-3 sm:mb-4" />
             <h3 className="text-lg sm:text-xl font-medium text-foreground mb-1 sm:mb-2 text-center">
-              {searchTerm ? 'Nenhum produto encontrado' : 'Nenhum produto cadastrado'}
+              {searchTerm || clienteSelecionado !== TODOS_CLIENTES ? 'Nenhum produto encontrado' : 'Nenhum produto cadastrado'}
             </h3>
             <p className="text-sm sm:text-base text-muted-foreground text-center">
-              {searchTerm ? 'Tente buscar com outros termos' : 'Não há produtos para deletar'}
+              {searchTerm || clienteSelecionado !== TODOS_CLIENTES
+                ? 'Tente ajustar a busca ou o filtro de cliente'
+                : 'Não há produtos para deletar'}
             </p>
           </CardContent>
         </Card>

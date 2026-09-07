@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
-import { Menu, X, Sun, Moon, FileText, List, RefreshCw, Trash2, Dog } from "lucide-react";
+import { Menu, X, Sun, Moon, FileText, List, RefreshCw, Trash2, Dog, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/lib/theme-provider";
 import instaLogo from "@assets/instagran.png";
@@ -12,6 +12,7 @@ export function Header() {
 
   const navItems = [
     { path: "/", label: "Registrar", icon: FileText },
+    { path: "/setup-rapido", label: "Setup Rápido", icon: Zap },
     { path: "/listar", label: "Listar", icon: List },
     { path: "/atualizar", label: "Atualizar", icon: RefreshCw },
     { path: "/deletar", label: "Deletar", icon: Trash2 },

@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Calendar, Loader2, Package, Barcode, User, Camera, X, Image as ImageIcon } from 'lucide-react'
+import { Calendar, Loader2, Package, Barcode, User, Camera, X, Image as ImageIcon, Zap } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
+import { Link } from 'wouter'
 
 // Schema tipado (productFormSchema / ProductFormValues)
 import { productFormSchema, type ProductFormValues } from '@shared/schema'
@@ -17,6 +18,7 @@ import { Calendar as CalendarComponent } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useToast } from '@/hooks/use-toast'
 import { productStorage } from '@/lib/localStorage'
+import { quickSetupStorage, type QuickSetupConfig } from '@/lib/quickSetup'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Scanner } from '@yudiel/react-qr-scanner'
 import { MarketAutocomplete } from '@/components/market-autocomplete'
@@ -71,18 +73,25 @@ export default function RegisterPage() {
   const [cameraPermissionGranted, setCameraPermissionGranted] = useState<boolean | null>(null)
   const hasCheckedPermission = useRef(false)
 
+  // Setup Rápido: operador + mercado já configurados de antemão. Quando
+  // ativo, esses três campos saem da vista (mas continuam no form e são
+  // enviados no submit — só ficam como <input type="hidden">).
+  const [quickSetup] = useState<QuickSetupConfig | null>(() => quickSetupStorage.get())
+  const [overrideQuickSetup, setOverrideQuickSetup] = useState(false)
+  const quickSetupActive = quickSetup !== null && !overrideQuickSetup
+
   const form = useForm<ProductFormValues>({
     resolver: zodResolver(productFormSchema),
     defaultValues: {
-      operatorName: '',
+      operatorName: quickSetup?.operatorName ?? '',
       eanCode: '',
       description: '',
       quantity: 1,
       quantityType: 'unidade',
       expirationDate: '',
       imageUrl: '',
-      nomeCliente: '',
-      enderecoCliente: ''
+      nomeCliente: quickSetup?.nomeCliente ?? '',
+      enderecoCliente: quickSetup?.enderecoCliente ?? ''
     }
   })
 
@@ -371,57 +380,98 @@ export default function RegisterPage() {
           <CardDescription>Preencha os dados abaixo. Escaneie o código de barras para preenchimento automático.</CardDescription>
         </CardHeader>
         <CardContent>
+          {/* Status do Setup Rápido — some quando não há configuração salva */}
+          {quickSetup && (
+            <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+              <div className="flex items-center gap-2 text-sm min-w-0">
+                <Zap className="h-4 w-4 text-primary shrink-0" />
+                <span className="text-foreground truncate">
+                  Setup Rápido: <span className="font-medium">{quickSetup.operatorName}</span> ·{' '}
+                  <span className="font-medium">{quickSetup.nomeCliente}</span>
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setOverrideQuickSetup((v) => !v)}
+                  data-testid="button-toggle-quicksetup">
+                  {overrideQuickSetup ? 'Usar Setup Rápido' : 'Usar outro mercado agora'}
+                </Button>
+                <Link href="/setup-rapido">
+                  <Button type="button" variant="ghost" size="sm">
+                    Editar
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          )}
+
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              {/* Nome do Operador */}
-              <FormField
-                control={form.control}
-                name="operatorName"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Nome do Operador</FormLabel>
-                    <FormControl>
-                      <div className="relative">
-                        <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <Input placeholder="Digite seu nome" className="pl-10" data-testid="input-operator-name" {...field} />
-                      </div>
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              {quickSetupActive ? (
+                // Setup Rápido ativo: operador/mercado/endereço já vêm preenchidos
+                // do storage e continuam sendo enviados no submit, só não aparecem
+                // na tela — é isso que deixa o formulário curto.
+                <>
+                  <input type="hidden" {...form.register('operatorName')} />
+                  <input type="hidden" {...form.register('nomeCliente')} />
+                  <input type="hidden" {...form.register('enderecoCliente')} />
+                </>
+              ) : (
+                <>
+                  {/* Nome do Operador */}
+                  <FormField
+                    control={form.control}
+                    name="operatorName"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Nome do Operador</FormLabel>
+                        <FormControl>
+                          <div className="relative">
+                            <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                            <Input placeholder="Digite seu nome" className="pl-10" data-testid="input-operator-name" {...field} />
+                          </div>
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-              {/* Nome do Cliente / Mercado */}
-              <FormField
-                control={form.control}
-                name="nomeCliente"
-                render={({ field }) => (
-                  <FormItem className="flex flex-col">
-                    <FormLabel>Nome do Cliente / Mercado</FormLabel>
-                    <MarketAutocomplete />
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                  {/* Nome do Cliente / Mercado */}
+                  <FormField
+                    control={form.control}
+                    name="nomeCliente"
+                    render={({ field }) => (
+                      <FormItem className="flex flex-col">
+                        <FormLabel>Nome do Cliente / Mercado</FormLabel>
+                        <MarketAutocomplete />
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-              {/* Endereço do Cliente */}
-              <FormField
-                control={form.control}
-                name="enderecoCliente"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Endereço do Cliente</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="Será preenchido dinamicamente ao selecionar o mercado ou EAN"
-                        {...field}
-                        className="bg-muted/30"
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                  {/* Endereço do Cliente */}
+                  <FormField
+                    control={form.control}
+                    name="enderecoCliente"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Endereço do Cliente</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="Será preenchido dinamicamente ao selecionar o mercado ou EAN"
+                            {...field}
+                            className="bg-muted/30"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </>
+              )}
 
               {/* Código EAN com Scanner */}
               <FormField

@@ -32,37 +32,41 @@ interface Endereco {
   estado: string
 }
 
-interface ProdutoLocal {
-  codigoEAN: string
+interface CatalogoProdutoLocal {
   descricao: string
+  marca: string
+  categoria: string
+  unidade: string
+  validadeMediaDias: number
 }
 
 interface MercadoLocal {
   nome: string
   endereco: Endereco
-  produtos: ProdutoLocal[]
 }
 
+// v2: catálogo de produtos é global (chave = EAN), desacoplado dos
+// mercados — qualquer produto pode ser vendido em qualquer mercado.
 interface FrutapDataStructure {
-  mercados: MercadoLocal[]
+  produtos: Record<string, CatalogoProdutoLocal>
+  mercados: Record<string, MercadoLocal>
 }
 
 // Cast seguro do JSON importado
 const dataFrutapTipado = dataFrutap as unknown as FrutapDataStructure
 
-// Lista "achatada" de TODOS os produtos de TODOS os mercados,
-// pois o catálogo de produtos é um dado global do projeto —
-// não deve ficar amarrado a um mercado específico.
-interface ProdutoAchatado extends ProdutoLocal {
-  mercadoOrigem: string
+// Lista "achatada" de TODOS os produtos do catálogo global, pra busca por
+// EAN independente de mercado — é exatamente o mesmo catálogo que qualquer
+// mercado pode usar.
+interface ProdutoAchatado {
+  codigoEAN: string
+  descricao: string
 }
 
-const todosProdutosFrutap: ProdutoAchatado[] = dataFrutapTipado.mercados.flatMap((mercado) =>
-  mercado.produtos.map((produto) => ({
-    ...produto,
-    mercadoOrigem: mercado.nome
-  }))
-)
+const todosProdutosFrutap: ProdutoAchatado[] = Object.entries(dataFrutapTipado.produtos).map(([codigoEAN, produto]) => ({
+  codigoEAN,
+  descricao: produto.descricao
+}))
 
 export default function RegisterPage() {
   const { toast } = useToast()

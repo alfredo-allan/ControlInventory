@@ -7,6 +7,8 @@ import { ThemeProvider } from "@/lib/theme-provider";
 import { Header } from "@/components/Header";
 import RegisterPage from "@/pages/register";
 import QuickSetupPage from "@/pages/quick-setup";
+import PesquisaSemanalPage from "@/pages/pesquisa-semanal";
+import PainelSugestaoPage from "@/pages/painel-sugestao";
 import ListPage from "@/pages/list";
 import UpdatePage from "@/pages/update";
 import DeletePage from "@/pages/delete";
@@ -18,6 +20,8 @@ function Router() {
     <Switch>
       <Route path="/" component={RegisterPage} />
       <Route path="/setup-rapido" component={QuickSetupPage} />
+      <Route path="/pesquisa-semanal" component={PesquisaSemanalPage} />
+      <Route path="/painel-sugestao" component={PainelSugestaoPage} />
       <Route path="/listar" component={ListPage} />
       <Route path="/atualizar" component={UpdatePage} />
       <Route path="/deletar" component={DeletePage} />

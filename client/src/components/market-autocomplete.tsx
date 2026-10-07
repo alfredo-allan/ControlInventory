@@ -21,19 +21,15 @@ interface Endereco {
   estado: string
 }
 
-interface Produto {
-  codigoEAN: string
-  descricao: string
-}
-
 interface Mercado {
   nome: string
   endereco: Endereco
-  produtos: Produto[]
 }
 
+// v2: catálogo de produtos é global (chave = EAN) e não fica mais aninhado
+// dentro de cada mercado — aqui só precisamos dos mercados mesmo.
 interface FrutapData {
-  mercados: Mercado[]
+  mercados: Record<string, Mercado>
 }
 
 // Fazemos um cast seguro baseado na estrutura real do arquivo
@@ -58,7 +54,7 @@ function formatarEndereco(end: Endereco): string {
 function getMercadosSugeridos(): MercadoSugerido[] {
   const vistos = new Map<string, MercadoSugerido>()
 
-  data.mercados.forEach((mercado) => {
+  Object.values(data.mercados).forEach((mercado) => {
     vistos.set(mercado.nome, {
       nome: mercado.nome,
       enderecoFormatado: formatarEndereco(mercado.endereco)

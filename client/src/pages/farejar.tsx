@@ -9,6 +9,7 @@ import { toZonedTime } from 'date-fns-tz'
 import type { Product } from '@shared/schema'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { productStorage } from '@/lib/localStorage'
+import { puxarDoServidor } from '@/lib/pullSync'
 import { useLocation } from 'wouter'
 
 const SAO_PAULO_TZ = 'America/Sao_Paulo'
@@ -23,7 +24,14 @@ export default function FarejarPage() {
     setIsScanning(true)
     setHasScanned(false)
 
-    await new Promise((resolve) => setTimeout(resolve, 1500))
+    // Antes, esse tempo de "Farejando..." era só efeito visual (um
+    // setTimeout sem fazer nada). Agora ele reflete trabalho de verdade:
+    // puxa o estado mais recente do servidor (produtos registrados em
+    // QUALQUER aparelho, não só este) antes de varrer os vencimentos —
+    // e mantém um mínimo de 600ms pra animação não parecer instantânea
+    // demais quando a rede responde rápido. Offline/sem sessão: segue com
+    // o que já tem local, sem travar o scan.
+    await Promise.all([puxarDoServidor().catch(() => {}), new Promise((resolve) => setTimeout(resolve, 600))])
 
     const expiringProducts = productStorage.getExpiringWithinDays(3)
 

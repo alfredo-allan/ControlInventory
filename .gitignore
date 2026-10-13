@@ -5,3 +5,9 @@ server/public
 vite.config.ts.*
 *.tar.gz
 .vercel
+.env
+.env.local
+.env.*.local
+backend/venv
+backend/__pycache__
+backend/dev.db

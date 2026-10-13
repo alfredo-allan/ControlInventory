@@ -9,6 +9,7 @@ import { ptBR } from 'date-fns/locale'
 import { toZonedTime } from 'date-fns-tz'
 import type { Product } from '@shared/schema'
 import { productStorage } from '@/lib/localStorage'
+import { puxarDoServidor } from '@/lib/pullSync'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
@@ -62,7 +63,13 @@ export default function ListPage() {
   })
 
   useEffect(() => {
+    // Mostra o que já está salvo neste aparelho na hora (offline-first), e
+    // em paralelo tenta puxar o estado mais recente do servidor — é o que
+    // faz um produto registrado em OUTRO aparelho aparecer aqui também.
     setProducts(productStorage.getAll())
+    puxarDoServidor()
+      .catch(() => {})
+      .finally(() => setProducts(productStorage.getAll()))
   }, [])
 
   // Lista de clientes únicos (nome + endereço) presentes nos produtos cadastrados

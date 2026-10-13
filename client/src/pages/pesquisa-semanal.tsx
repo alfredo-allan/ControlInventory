@@ -1,8 +1,22 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, Link } from 'wouter'
-import { ClipboardList, Minus, Plus, AlertTriangle, Info, PackagePlus, Zap, Search } from 'lucide-react'
+import {
+  ClipboardList,
+  ChevronUp,
+  ChevronDown,
+  AlertTriangle,
+  Info,
+  PackagePlus,
+  Zap,
+  Search,
+  Camera,
+  DollarSign,
+  Loader2,
+  Check
+} from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
+import { Scanner } from '@yudiel/react-qr-scanner'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -11,6 +25,8 @@ import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { useToast } from '@/hooks/use-toast'
+import { useBarcodeScanner } from '@/hooks/use-barcode-scanner'
+import { cn } from '@/lib/utils'
 import { quickSetupStorage } from '@/lib/quickSetup'
 import {
   listarMercados,
@@ -19,10 +35,14 @@ import {
   garantirMercado,
   cadastrarProdutoNoCatalogo,
   definirEstoqueInicial,
+  definirPrecoUnitario,
   salvarPesquisaSemanal,
   getPesquisaDoCicloAtual,
   getCicloIdAtual
 } from '@/lib/estoqueStorage'
+import { puxarDoServidor } from '@/lib/pullSync'
+
+const formatarPreco = (valor: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor)
 
 export default function PesquisaSemanalPage() {
   const { toast } = useToast()
@@ -32,6 +52,13 @@ export default function PesquisaSemanalPage() {
   const [mercados, setMercados] = useState(() => listarMercados())
   const [mercadoId, setMercadoId] = useState<string>('')
   const [contagens, setContagens] = useState<Record<string, number>>({})
+  const [precos, setPrecos] = useState<Record<string, number>>({})
+  // 'salvando' por ~350ms e depois 'salvo' por ~900ms ao perder o foco do
+  // campo de preço — feedback puramente perceptual (o salvamento local em
+  // si é síncrono/instantâneo), pra dar certeza visual de que o blur
+  // realmente registrou o valor. A sincronização de verdade com o servidor
+  // continua representada à parte, pelo indicador global no Header.
+  const [statusSalvamentoPreco, setStatusSalvamentoPreco] = useState<Record<string, 'salvando' | 'salvo'>>({})
   const [mostrarConfirmacao, setMostrarConfirmacao] = useState(false)
   const [mostrarAdicionarProduto, setMostrarAdicionarProduto] = useState(false)
   const [novoProduto, setNovoProduto] = useState({ codigoEAN: '', descricao: '', quantidadeInicial: 0 })
@@ -39,6 +66,13 @@ export default function PesquisaSemanalPage() {
   // Incrementado sempre que a lista de produtos do mercado precisa ser
   // relida do storage (ex.: depois de cadastrar um produto novo).
   const [refreshKey, setRefreshKey] = useState(0)
+
+  // Item que acabou de ser lido pela câmera — usado pra focar o campo de
+  // quantidade dele e revelar o campo de preço só desse item (o catálogo
+  // inteiro tendo input de preço visível o tempo todo ficaria poluído).
+  const [itemEmFocoEAN, setItemEmFocoEAN] = useState<string | null>(null)
+  const [precoVisivelEAN, setPrecoVisivelEAN] = useState<Set<string>>(new Set())
+  const quantidadeInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
   // Ao montar: se o Setup Rápido tem um mercado configurado, já usa ele —
   // criando o mercado no estoque na hora, se ainda não existir por lá.
@@ -60,20 +94,47 @@ export default function PesquisaSemanalPage() {
       setMercados(lista)
       if (lista.length > 0) setMercadoId(lista[0].id)
     }
+
+    // Local-first: a seleção de mercado acima já usa o que está salvo neste
+    // aparelho. Em paralelo, puxa catálogo/mercados/saldos do servidor —
+    // pega mercados e produtos cadastrados por outro operador, noutro
+    // aparelho — e, quando terminar, atualiza a lista de mercados e força
+    // `produtos` (useMemo abaixo) a reler o storage via `refreshKey`.
+    // Silencioso em erro (offline/sem sessão): segue só com o que já tinha.
+    puxarDoServidor()
+      .catch(() => {})
+      .then(() => {
+        setMercados(listarMercados())
+        setRefreshKey((k) => k + 1)
+      })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const produtos = useMemo(() => (mercadoId ? listarProdutos(mercadoId) : []), [mercadoId, refreshKey])
 
   // Sempre que troca de mercado (ou os produtos mudam), reinicia a contagem
-  // com o valor esperado (estoque atual) como ponto de partida.
+  // com o valor esperado (estoque atual) como ponto de partida — e os preços
+  // com o que já estava salvo pra esse mercado.
   useEffect(() => {
-    const base: Record<string, number> = {}
+    const baseContagens: Record<string, number> = {}
+    const basePrecos: Record<string, number> = {}
     produtos.forEach(({ codigoEAN, produto }) => {
-      base[codigoEAN] = produto.estoque.quantidadeAtual
+      baseContagens[codigoEAN] = produto.estoque.quantidadeAtual
+      if (produto.estoque.precoUnitario) basePrecos[codigoEAN] = produto.estoque.precoUnitario
     })
-    setContagens(base)
+    setContagens(baseContagens)
+    setPrecos(basePrecos)
   }, [mercadoId, produtos])
+
+  // Troca de mercado limpa o "foco" do scanner — mas só a troca de mercado:
+  // isso roda separado do efeito acima pra não apagar o item recém-escaneado
+  // sempre que `produtos` mudar (ex.: logo depois de cadastrar um produto
+  // novo, que também mexe em `produtos` mas não deve perder o foco).
+  useEffect(() => {
+    setPrecoVisivelEAN(new Set())
+    setItemEmFocoEAN(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mercadoId])
 
   const pesquisaDoCiclo = mercadoId ? getPesquisaDoCicloAtual(mercadoId) : null
   const cicloAtual = getCicloIdAtual()
@@ -114,6 +175,80 @@ export default function PesquisaSemanalPage() {
     setContagens((atual) => ({ ...atual, [codigoEAN]: Math.max(0, (atual[codigoEAN] ?? 0) + delta) }))
   }
 
+  const revelarPreco = (codigoEAN: string) => {
+    setPrecoVisivelEAN((atual) => new Set(atual).add(codigoEAN))
+  }
+
+  // Máscara de centavos: cada tecla digitada reconsidera TODOS os dígitos já
+  // presentes no campo como centavos (ex.: digitar "1", "9", "5" em sequência
+  // vira 0,01 → 0,19 → 1,95) — é o padrão de input de moeda mais comum em
+  // apps brasileiros, evita o operador ter que digitar a vírgula na mão e
+  // funciona igual em qualquer teclado (inclusive numérico de celular).
+  const formatarCentavos = (valor: number) => valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  const atualizarPreco = (codigoEAN: string, valorDigitado: string) => {
+    const centavos = parseInt(valorDigitado.replace(/\D/g, ''), 10) || 0
+    setPrecos((atual) => ({ ...atual, [codigoEAN]: centavos / 100 }))
+  }
+
+  const persistirPreco = (codigoEAN: string) => {
+    if (!mercadoId) return
+    definirPrecoUnitario(mercadoId, codigoEAN, precos[codigoEAN] ?? 0)
+
+    setStatusSalvamentoPreco((atual) => ({ ...atual, [codigoEAN]: 'salvando' }))
+    window.setTimeout(() => {
+      setStatusSalvamentoPreco((atual) => ({ ...atual, [codigoEAN]: 'salvo' }))
+      window.setTimeout(() => {
+        setStatusSalvamentoPreco((atual) => {
+          const copia = { ...atual }
+          delete copia[codigoEAN]
+          return copia
+        })
+      }, 900)
+    }, 350)
+  }
+
+  // Scanner de câmera: ao ler um EAN, procura o produto no catálogo (que já
+  // é global — aparece pra qualquer mercado) e foca direto no campo de
+  // quantidade dele, revelando também o campo de preço pra preencher em
+  // seguida. Se o EAN não existir em lugar nenhum, abre o cadastro já com o
+  // código preenchido, em vez de simplesmente dizer "não encontrado".
+  const handleCodigoLido = (codigoEAN: string) => {
+    const encontrado = produtos.find((p) => p.codigoEAN === codigoEAN)
+
+    if (!encontrado) {
+      toast({
+        title: 'Produto não encontrado no catálogo',
+        description: 'Preencha a descrição pra cadastrar esse EAN agora.'
+      })
+      setNovoProduto((n) => ({ ...n, codigoEAN }))
+      setMostrarAdicionarProduto(true)
+      return
+    }
+
+    setBusca('')
+    setPrecoVisivelEAN((atual) => new Set(atual).add(codigoEAN))
+    setItemEmFocoEAN(codigoEAN)
+
+    toast({ title: 'Produto encontrado!', description: encontrado.produto.descricao })
+  }
+
+  const { showScanner, setShowScanner, openScanner, handleScan, handleScanError } = useBarcodeScanner(handleCodigoLido)
+
+  // Depois que o item escaneado aparece na lista (pode precisar de um render
+  // a mais quando a busca acabou de ser limpa), rola até ele e foca a
+  // quantidade — esse é o comportamento pedido: ler o EAN já deixa o
+  // operador digitando a quantidade na hora.
+  useEffect(() => {
+    if (!itemEmFocoEAN) return
+    const input = quantidadeInputRefs.current[itemEmFocoEAN]
+    if (input) {
+      input.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      input.focus()
+      input.select()
+    }
+  }, [itemEmFocoEAN, itensFiltrados])
+
   const handleCadastrarProduto = () => {
     if (!mercadoId || !novoProduto.codigoEAN || !novoProduto.descricao) {
       toast({ title: 'Preencha EAN e descrição', variant: 'destructive' })
@@ -131,6 +266,8 @@ export default function PesquisaSemanalPage() {
     setNovoProduto({ codigoEAN: '', descricao: '', quantidadeInicial: 0 })
     setMostrarAdicionarProduto(false)
     setMercados(listarMercados())
+    setPrecoVisivelEAN((atual) => new Set(atual).add(codigoEAN))
+    setItemEmFocoEAN(codigoEAN)
     setRefreshKey((k) => k + 1)
   }
 
@@ -222,8 +359,14 @@ export default function PesquisaSemanalPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {produtos.length > 8 && (
-            <div className="relative">
+          {/* Escanear produto — foco da melhoria: ler o EAN já leva direto pro
+              campo de quantidade do item, com o campo de preço aberto do lado. */}
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button type="button" onClick={openScanner} className="gap-2 sm:shrink-0" data-testid="button-escanear-produto">
+              <Camera className="h-4 w-4" />
+              Escanear Produto
+            </Button>
+            <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Buscar produto por nome ou EAN..."
@@ -233,7 +376,7 @@ export default function PesquisaSemanalPage() {
                 data-testid="input-busca-produto"
               />
             </div>
-          )}
+          </div>
 
           {itensFiltrados.length === 0 && (
             <p className="text-sm text-muted-foreground py-6 text-center">
@@ -241,42 +384,110 @@ export default function PesquisaSemanalPage() {
             </p>
           )}
 
-          {itensFiltrados.map((item) => (
-            <div
-              key={item.codigoEAN}
-              className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-lg border px-4 py-3">
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-foreground truncate">{item.descricao}</p>
-                <p className="text-xs text-muted-foreground font-mono">{item.codigoEAN}</p>
+          {itensFiltrados.map((item) => {
+            const precoAtual = precos[item.codigoEAN] ?? 0
+            const precoVisivel = precoVisivelEAN.has(item.codigoEAN)
+
+            return (
+              <div
+                key={item.codigoEAN}
+                className={cn(
+                  'flex flex-col sm:flex-row sm:items-center gap-3 rounded-lg border px-4 py-3 transition-colors',
+                  item.codigoEAN === itemEmFocoEAN && 'border-primary ring-2 ring-primary/20'
+                )}>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-foreground truncate">{item.descricao}</p>
+                  <p className="text-xs text-muted-foreground font-mono">{item.codigoEAN}</p>
+                </div>
+                <div className="text-xs text-muted-foreground shrink-0">Esperado: {item.quantidadeEsperada}</div>
+
+                {/* Seletor de quantidade — um único controle integrado (input +
+                    setas acopladas), em vez de botões Minus/Plus soltos ao lado
+                    da seta nativa do navegador (que duplicavam a mesma ação e
+                    deixavam a linha poluída). As setas nativas do input number
+                    ficam escondidas via CSS; estas aqui são as únicas visíveis. */}
+                <div className="flex items-stretch rounded-md border border-input bg-background shrink-0 overflow-hidden">
+                  <Input
+                    type="number"
+                    min="0"
+                    inputMode="numeric"
+                    className="w-14 border-0 rounded-none text-center focus-visible:ring-0 focus-visible:ring-offset-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    value={contagens[item.codigoEAN] ?? 0}
+                    onChange={(e) =>
+                      setContagens((atual) => ({ ...atual, [item.codigoEAN]: Math.max(0, parseInt(e.target.value, 10) || 0) }))
+                    }
+                    ref={(el) => {
+                      quantidadeInputRefs.current[item.codigoEAN] = el
+                    }}
+                    data-testid={`input-contagem-${item.codigoEAN}`}
+                  />
+                  <div className="flex flex-col border-l border-input">
+                    <button
+                      type="button"
+                      aria-label="Aumentar quantidade"
+                      className="flex h-[17px] w-6 items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground"
+                      onClick={() => ajustarContagem(item.codigoEAN, 1)}>
+                      <ChevronUp className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Diminuir quantidade"
+                      className="flex h-[17px] w-6 items-center justify-center border-t border-input text-muted-foreground hover:bg-accent hover:text-foreground"
+                      onClick={() => ajustarContagem(item.codigoEAN, -1)}>
+                      <ChevronDown className="h-3 w-3" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Preço (R$) — fica escondido por padrão pra não poluir o catálogo
+                    inteiro; aparece quando o item é escaneado ou quando o operador
+                    clica pra informar manualmente. Máscara de centavos + feedback
+                    de salvamento (spinner -> check) ao perder o foco. */}
+                {precoVisivel ? (
+                  <div className="relative shrink-0 w-28">
+                    <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                      R$
+                    </span>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="0,00"
+                      className="pl-8 pr-7 text-right"
+                      value={precos[item.codigoEAN] !== undefined ? formatarCentavos(precos[item.codigoEAN]) : ''}
+                      onChange={(e) => atualizarPreco(item.codigoEAN, e.target.value)}
+                      onBlur={() => persistirPreco(item.codigoEAN)}
+                      data-testid={`input-preco-${item.codigoEAN}`}
+                    />
+                    {statusSalvamentoPreco[item.codigoEAN] === 'salvando' && (
+                      <Loader2 className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-muted-foreground" />
+                    )}
+                    {statusSalvamentoPreco[item.codigoEAN] === 'salvo' && (
+                      <Check className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-emerald-500" />
+                    )}
+                  </div>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0 gap-1 text-muted-foreground"
+                    onClick={() => revelarPreco(item.codigoEAN)}
+                    data-testid={`button-preco-${item.codigoEAN}`}>
+                    <DollarSign className="h-3.5 w-3.5" />
+                    {precoAtual > 0 ? formatarPreco(precoAtual) : 'Preço'}
+                  </Button>
+                )}
+
+                {item.divergenciaGrande && (
+                  <Badge variant="destructive" className="shrink-0 gap-1">
+                    <AlertTriangle className="h-3 w-3" />
+                    {item.divergencia > 0 ? '+' : ''}
+                    {item.divergencia}
+                  </Badge>
+                )}
               </div>
-              <div className="text-xs text-muted-foreground shrink-0">Esperado: {item.quantidadeEsperada}</div>
-              <div className="flex items-center gap-2 shrink-0">
-                <Button type="button" variant="outline" size="icon" onClick={() => ajustarContagem(item.codigoEAN, -1)}>
-                  <Minus className="h-4 w-4" />
-                </Button>
-                <Input
-                  type="number"
-                  min="0"
-                  className="w-20 text-center"
-                  value={contagens[item.codigoEAN] ?? 0}
-                  onChange={(e) =>
-                    setContagens((atual) => ({ ...atual, [item.codigoEAN]: Math.max(0, parseInt(e.target.value, 10) || 0) }))
-                  }
-                  data-testid={`input-contagem-${item.codigoEAN}`}
-                />
-                <Button type="button" variant="outline" size="icon" onClick={() => ajustarContagem(item.codigoEAN, 1)}>
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </div>
-              {item.divergenciaGrande && (
-                <Badge variant="destructive" className="shrink-0 gap-1">
-                  <AlertTriangle className="h-3 w-3" />
-                  {item.divergencia > 0 ? '+' : ''}
-                  {item.divergencia}
-                </Badge>
-              )}
-            </div>
-          ))}
+            )
+          })}
 
           <Button type="button" variant="outline" className="gap-2" onClick={() => setMostrarAdicionarProduto(true)}>
             <PackagePlus className="h-4 w-4" />
@@ -357,6 +568,34 @@ export default function PesquisaSemanalPage() {
             />
             <Button onClick={handleCadastrarProduto} className="w-full">
               Cadastrar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Scanner da câmera — ler o EAN já foca a quantidade do item na lista
+          (ou abre o cadastro, se o produto ainda não existir em lugar nenhum). */}
+      <Dialog open={showScanner} onOpenChange={setShowScanner}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Escanear Código de Barras</DialogTitle>
+            <DialogDescription>Aponte a câmera para o código EAN do produto.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="w-full rounded-lg overflow-hidden bg-black">
+              {showScanner && (
+                <Scanner
+                  onScan={handleScan}
+                  onError={handleScanError}
+                  constraints={{ facingMode: 'environment' }}
+                  formats={['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e']}
+                  components={{ finder: true, torch: true }}
+                  styles={{ container: { width: '100%', height: '400px' } }}
+                />
+              )}
+            </div>
+            <Button variant="outline" onClick={() => setShowScanner(false)} className="w-full">
+              Fechar Scanner
             </Button>
           </div>
         </DialogContent>

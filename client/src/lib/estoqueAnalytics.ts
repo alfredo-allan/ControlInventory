@@ -22,8 +22,20 @@ function filtrarMovimentacoesJanela(
   })
 }
 
-// Taxa média de saída por dia, considerando só saídas motivo="venda" — avaria
-// e vencimento não são demanda real, não devem inflar a sugestão de pedido.
+// Taxa média de saída por dia — base da Sugestão de Pedido. Conta saídas
+// motivo="venda" OU motivo="ajuste"; NÃO conta "avaria" nem "vencimento"
+// (perda não é demanda real, não deve inflar a sugestão de pedido).
+//
+// Por que "ajuste" conta (corrigido em 2026-10-13, v2.7): o app não tem
+// nenhuma tela de "registrar venda" — hoje o único jeito que existe de medir
+// consumo real é a divergência negativa da Pesquisa Semanal (contagem nova
+// menor que o saldo esperado = produto saiu/foi vendido entre uma pesquisa e
+// outra). Antes dessa correção, o filtro aceitava só motivo="venda", que
+// nenhum fluxo do app de fato gera — resultado: Giro/dia e Sugestão ficavam
+// sempre em 0, mesmo com uso real acumulado (achado rodando um teste de
+// ponta a ponta com dados variados — ver `claude/arquitetura-modulo-estoque.md`).
+// Se um dia existir uma tela dedicada de registrar venda (`motivo: 'venda'`,
+// via `registrarMovimentacao`, já pronta pra isso), ela passa a contar junto.
 export function calcularTaxaDiaria(
   movimentacoes: Movimentacao[],
   params: { mercadoId: string; codigoEAN: string; diasJanela?: number; diasOffset?: number }
@@ -34,7 +46,7 @@ export function calcularTaxaDiaria(
     codigoEAN: params.codigoEAN,
     diasJanela,
     diasOffset: params.diasOffset
-  }).filter((m) => m.tipo === 'saida' && m.motivo === 'venda')
+  }).filter((m) => m.tipo === 'saida' && (m.motivo === 'venda' || m.motivo === 'ajuste'))
 
   const total = relevantes.reduce((soma, m) => soma + m.quantidade, 0)
   return total / diasJanela
@@ -173,7 +185,13 @@ export function serieDiariaDeSaidas(
     proximoDia.setDate(proximoDia.getDate() + 1)
 
     const quantidade = movimentacoes
-      .filter((m) => m.mercadoId === params.mercadoId && m.codigoEAN === params.codigoEAN && m.tipo === 'saida' && m.motivo === 'venda')
+      .filter(
+        (m) =>
+          m.mercadoId === params.mercadoId &&
+          m.codigoEAN === params.codigoEAN &&
+          m.tipo === 'saida' &&
+          (m.motivo === 'venda' || m.motivo === 'ajuste')
+      )
       .filter((m) => {
         const t = new Date(m.data).getTime()
         return t >= dia.getTime() && t < proximoDia.getTime()

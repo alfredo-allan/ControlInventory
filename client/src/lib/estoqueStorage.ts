@@ -17,11 +17,12 @@
 // mercados. O botão de exportar gera um .json de verdade pra backup.
 
 import dataFrutap from '../data/frutap.json'
+import { enfileirar } from './syncQueue'
 
 const STORAGE_KEY = 'estoque-data'
 const CONFIG_KEY = 'estoque-config'
 export const EMPRESA_PADRAO = 'frutap'
-const SCHEMA_VERSION = 2 as const
+const SCHEMA_VERSION = 3 as const
 
 // ---------------------------------------------------------------------------
 // Tipos
@@ -52,6 +53,7 @@ export interface SaldoEstoque {
   quantidadeAtual: number
   quantidadeMinima: number
   atualizadoEm: string
+  precoUnitario?: number // R$ — opcional; só existe depois que alguém informa na Pesquisa Semanal
 }
 
 // View "achatada" (catálogo + saldo do mercado) que as telas consomem — é
@@ -91,6 +93,25 @@ export interface PesquisaSemanal {
   itens: PesquisaSemanalItem[]
 }
 
+// v2.4 — registro de avaria/quebra (página dedicada "Avarias e Quebras").
+// Cada avaria já abate o saldo do mercado na hora (ver `registrarAvaria`
+// abaixo) e também gera uma `Movimentacao` de saída com motivo='avaria' —
+// o registro dedicado aqui é o que vira relatório (.docx); a Movimentacao
+// é só o que os cálculos de perdas (estoqueAnalytics.ts, métricas do
+// backend) já sabiam ler.
+export interface RegistroAvaria {
+  id: string
+  mercadoId: string
+  codigoEAN: string
+  descricao: string
+  quantidade: number
+  motivo: string // texto livre, opcional ("quebrou no transporte", etc.)
+  operador: string
+  nomeCliente: string
+  enderecoCliente: string
+  registradoEm: string // ISO datetime
+}
+
 export interface EmpresaEstoque {
   nome: string
   produtos: Record<string, CatalogoProduto> // chave = codigoEAN — catálogo global
@@ -98,6 +119,7 @@ export interface EmpresaEstoque {
   estoquePorMercado: Record<string, Record<string, SaldoEstoque>> // [mercadoId][codigoEAN]
   movimentacoes: Movimentacao[]
   pesquisasSemanais: PesquisaSemanal[]
+  avarias: RegistroAvaria[]
 }
 
 export interface EstoqueData {
@@ -154,7 +176,7 @@ const frutapCatalogo = dataFrutap as unknown as FrutapJsonV2
 // ---------------------------------------------------------------------------
 
 function criarEmpresaVazia(nome: string): EmpresaEstoque {
-  return { nome, produtos: {}, mercados: {}, estoquePorMercado: {}, movimentacoes: [], pesquisasSemanais: [] }
+  return { nome, produtos: {}, mercados: {}, estoquePorMercado: {}, movimentacoes: [], pesquisasSemanais: [], avarias: [] }
 }
 
 function seedEmpresaFrutap(data: EstoqueData): boolean {
@@ -253,6 +275,15 @@ function migrarSeNecessario(data: EstoqueData): boolean {
   for (const [empresaId, empresa] of Object.entries(data.empresas)) {
     if (pareceV1(empresa)) {
       data.empresas[empresaId] = migrarEmpresaV1ParaV2(empresa as unknown as EmpresaEstoqueV1)
+      alterou = true
+    }
+  }
+  // v2 -> v3: só adiciona `avarias: []` em quem já tinha v2 salvo sem esse
+  // campo (criarEmpresaVazia/migrarEmpresaV1ParaV2 já cobrem os casos
+  // novos) — aditivo, não mexe em mais nada do que já existia.
+  for (const empresa of Object.values(data.empresas)) {
+    if (!Array.isArray((empresa as EmpresaEstoque).avarias)) {
+      ;(empresa as EmpresaEstoque).avarias = []
       alterou = true
     }
   }
@@ -386,18 +417,38 @@ export function encontrarMercadoPorNome(nome: string, empresaId = EMPRESA_PADRAO
 // Cria o mercado se ele ainda não existir no estoque (ex.: mercado usado no
 // Setup Rápido/Registrar mas que não está no catálogo estático do Frutap).
 // Assim que criado, TODO o catálogo global já fica disponível pra ele.
+//
+// IMPORTANTE (bug corrigido em 2026-10-13): todo evento de sync que toca um
+// mercado (movimentação, pesquisa semanal, avaria, ...) manda só `mercadoId`
+// (o slug) pro backend — nunca o nome de verdade. Se o backend precisasse
+// criar o registro do mercado do zero a partir de um desses eventos (ordem
+// de chegada da fila offline), ele caía pra `nome = slug`
+// (`_get_or_create_mercado` em backend/app/sync/handlers.py), e o próximo
+// pull-sync trazia esse `nome` degradado de volta e SOBRESCREVIA o nome
+// local corretamente acentuado (`mergeCatalogoEMercadosFromServer` não
+// discrimina "nome bom" de "nome caiu pro slug"). Resultado visível: um
+// mercado criado como "Demonstração Sugestão" aparecia depois como
+// "demonstracao-sugestao" no dropdown do Painel de Sugestão. Corrigido
+// enfileirando esse evento dedicado, que carrega o nome/endereço de
+// verdade pro backend materializar/corrigir o registro — ver
+// `handle_estoque_garantir_mercado` no backend, que também AUTOCURA um
+// registro que já tinha caído pro slug antes dessa correção existir.
 export function garantirMercado(nome: string, endereco: EnderecoEstoque, empresaId = EMPRESA_PADRAO): string {
   const data = getEstoqueData()
   const empresa = data.empresas[empresaId] ?? criarEmpresaVazia(empresaId)
 
   const existenteId = encontrarMercadoPorNome(nome, empresaId)
-  if (existenteId) return existenteId
+  const mercadoId = existenteId ?? (slugify(nome) || `mercado-${Date.now()}`)
 
-  const mercadoId = slugify(nome) || `mercado-${Date.now()}`
-  empresa.mercados[mercadoId] = { nome, endereco }
-  empresa.estoquePorMercado[mercadoId] = {}
-  data.empresas[empresaId] = empresa
-  salvarDataBruta(data)
+  if (!existenteId) {
+    empresa.mercados[mercadoId] = { nome, endereco }
+    empresa.estoquePorMercado[mercadoId] = {}
+    data.empresas[empresaId] = empresa
+    salvarDataBruta(data)
+  }
+
+  void enfileirar('estoque.garantirMercado', { empresaId, mercadoId, nome, endereco })
+
   return mercadoId
 }
 
@@ -421,6 +472,7 @@ export function cadastrarProdutoNoCatalogo(
     validadeMediaDias: opcoes?.validadeMediaDias ?? CONFIGURACAO_PADRAO.validadeMediaDiasPadrao
   }
   salvarDataBruta(data)
+  void enfileirar('estoque.cadastrarProduto', { empresaId, codigoEAN, produto: empresa.produtos[codigoEAN] })
 }
 
 // Define/ajusta o saldo inicial de um produto (já existente no catálogo) num
@@ -437,11 +489,13 @@ export function definirEstoqueInicial(
   if (!empresa || !empresa.produtos[codigoEAN] || !empresa.mercados[mercadoId]) return
 
   if (!empresa.estoquePorMercado[mercadoId]) empresa.estoquePorMercado[mercadoId] = {}
+  const saldoAnterior = empresa.estoquePorMercado[mercadoId][codigoEAN]
 
   empresa.estoquePorMercado[mercadoId][codigoEAN] = {
     quantidadeAtual: quantidadeInicial,
-    quantidadeMinima: empresa.estoquePorMercado[mercadoId][codigoEAN]?.quantidadeMinima ?? 0,
-    atualizadoEm: new Date().toISOString()
+    quantidadeMinima: saldoAnterior?.quantidadeMinima ?? 0,
+    atualizadoEm: new Date().toISOString(),
+    precoUnitario: saldoAnterior?.precoUnitario
   }
 
   if (quantidadeInicial > 0) {
@@ -459,6 +513,37 @@ export function definirEstoqueInicial(
   }
 
   salvarDataBruta(data)
+  void enfileirar('estoque.definirEstoqueInicial', { empresaId, mercadoId, codigoEAN, quantidadeInicial, operador })
+}
+
+// Define/ajusta o valor unitário (R$) de um produto num mercado específico —
+// usado pela Pesquisa Semanal quando o operador informa o preço (manualmente
+// ou logo depois de escanear o EAN). Não mexe em quantidade/movimentação,
+// só no campo de preço daquele saldo.
+export function definirPrecoUnitario(
+  mercadoId: string,
+  codigoEAN: string,
+  precoUnitario: number,
+  empresaId = EMPRESA_PADRAO
+): void {
+  const data = getEstoqueData()
+  const empresa = data.empresas[empresaId]
+  if (!empresa || !empresa.produtos[codigoEAN] || !empresa.mercados[mercadoId]) return
+
+  if (!empresa.estoquePorMercado[mercadoId]) empresa.estoquePorMercado[mercadoId] = {}
+  const saldoAnterior = empresa.estoquePorMercado[mercadoId][codigoEAN] ?? {
+    quantidadeAtual: 0,
+    quantidadeMinima: 0,
+    atualizadoEm: new Date().toISOString()
+  }
+
+  empresa.estoquePorMercado[mercadoId][codigoEAN] = {
+    ...saldoAnterior,
+    precoUnitario: Math.max(0, precoUnitario)
+  }
+
+  salvarDataBruta(data)
+  void enfileirar('estoque.definirPreco', { empresaId, mercadoId, codigoEAN, precoUnitario })
 }
 
 // Registra uma movimentação (entrada/saída) e já recalcula o saldo do
@@ -500,10 +585,12 @@ export function registrarMovimentacao(params: {
   empresa.estoquePorMercado[params.mercadoId][params.codigoEAN] = {
     quantidadeAtual: Math.max(0, saldoAtual.quantidadeAtual + delta),
     quantidadeMinima: saldoAtual.quantidadeMinima,
-    atualizadoEm: new Date().toISOString()
+    atualizadoEm: new Date().toISOString(),
+    precoUnitario: saldoAtual.precoUnitario
   }
 
   salvarDataBruta(data)
+  void enfileirar('estoque.registrarMovimentacao', { empresaId, ...params })
 }
 
 // Fecha a pesquisa semanal: ajusta o saldo de cada item pela contagem real
@@ -549,7 +636,8 @@ export function salvarPesquisaSemanal(params: {
     saldos[codigoEAN] = {
       quantidadeAtual: quantidadeContada,
       quantidadeMinima: saldoAnterior?.quantidadeMinima ?? 0,
-      atualizadoEm: agora
+      atualizadoEm: agora,
+      precoUnitario: saldoAnterior?.precoUnitario
     }
 
     return { codigoEAN, quantidadeEsperada, quantidadeContada, divergencia }
@@ -566,7 +654,186 @@ export function salvarPesquisaSemanal(params: {
 
   empresa.pesquisasSemanais.push(pesquisa)
   salvarDataBruta(data)
+  void enfileirar('estoque.fecharPesquisaSemanal', { empresaId, ...pesquisa })
   return pesquisa
+}
+
+// ---------------------------------------------------------------------------
+// Avarias e quebras (v2.4) — página dedicada, mesmo padrão de EAN + Setup
+// Rápido que o resto do app já usa. Registrar uma avaria abate o saldo na
+// hora (como uma saída normal) e gera o registro dedicado, os dois juntos
+// — ver o comentário de `RegistroAvaria` e o handler espelho no backend
+// (`handle_avaria_registrar`, app/sync/handlers.py) pro porquê de serem
+// uma coisa só em vez de duas ações separadas.
+// ---------------------------------------------------------------------------
+
+export function listarAvarias(empresaId = EMPRESA_PADRAO): RegistroAvaria[] {
+  const avarias = getEstoqueData().empresas[empresaId]?.avarias ?? []
+  return avarias.slice().sort((a, b) => b.registradoEm.localeCompare(a.registradoEm))
+}
+
+export function registrarAvaria(params: {
+  mercadoId: string
+  codigoEAN: string
+  descricao: string
+  quantidade: number
+  motivo: string
+  operador: string
+  nomeCliente: string
+  enderecoCliente: string
+  empresaId?: string
+}): RegistroAvaria | null {
+  const empresaId = params.empresaId ?? EMPRESA_PADRAO
+  const data = getEstoqueData()
+  const empresa = data.empresas[empresaId]
+  if (!empresa || !empresa.mercados[params.mercadoId]) return null
+
+  const agora = new Date().toISOString()
+  const registro: RegistroAvaria = {
+    id: crypto.randomUUID(),
+    mercadoId: params.mercadoId,
+    codigoEAN: params.codigoEAN,
+    descricao: params.descricao,
+    quantidade: params.quantidade,
+    motivo: params.motivo,
+    operador: params.operador,
+    nomeCliente: params.nomeCliente,
+    enderecoCliente: params.enderecoCliente,
+    registradoEm: agora
+  }
+
+  // Mesmo efeito de uma saída por avaria — abate o saldo e entra no ledger
+  // de movimentações, igual registrarMovimentacao() já faz pros outros
+  // motivos — só que aqui sai tudo junto num único evento de sync
+  // (avaria.registrar), pro backend nunca poder ficar com um sem o outro.
+  if (!empresa.estoquePorMercado[params.mercadoId]) empresa.estoquePorMercado[params.mercadoId] = {}
+  const saldoAnterior = empresa.estoquePorMercado[params.mercadoId][params.codigoEAN] ?? {
+    quantidadeAtual: 0,
+    quantidadeMinima: 0,
+    atualizadoEm: agora
+  }
+  empresa.estoquePorMercado[params.mercadoId][params.codigoEAN] = {
+    ...saldoAnterior,
+    quantidadeAtual: Math.max(0, saldoAnterior.quantidadeAtual - params.quantidade),
+    atualizadoEm: agora
+  }
+
+  empresa.movimentacoes.push({
+    id: crypto.randomUUID(),
+    mercadoId: params.mercadoId,
+    codigoEAN: params.codigoEAN,
+    tipo: 'saida',
+    motivo: 'avaria',
+    quantidade: params.quantidade,
+    operador: params.operador,
+    data: agora,
+    cicloId: getCicloIdAtual()
+  })
+
+  empresa.avarias.push(registro)
+  salvarDataBruta(data)
+  void enfileirar('avaria.registrar', { empresaId, ...registro })
+  return registro
+}
+
+// "Limpar todos os logs" (admin) — espelha localmente o que o backend
+// acabou de apagar de verdade (POST /api/admin/logs/limpar): avarias,
+// movimentações e pesquisas semanais somem também daqui, senão o app
+// continuaria mostrando o histórico antigo até o próximo pull-sync. NÃO
+// mexe em saldo/catálogo/mercados — só o log/histórico, igual o backend.
+export function limparLogsLocais(empresaId = EMPRESA_PADRAO): void {
+  const data = getEstoqueData()
+  const empresa = data.empresas[empresaId]
+  if (!empresa) return
+  empresa.avarias = []
+  empresa.movimentacoes = []
+  empresa.pesquisasSemanais = []
+  salvarDataBruta(data)
+}
+
+// ---------------------------------------------------------------------------
+// Pull-sync — funde catálogo/mercados/saldos vindos do servidor no estoque
+// local (ver client/src/lib/pullSync.ts, que chama essas duas funções).
+// Sempre aditivo: só cria/atualiza o que o servidor mandou, nunca apaga um
+// mercado ou produto que só existe neste aparelho e ainda não sincronizou —
+// mesma filosofia de "nunca perder dado offline" do resto do módulo.
+// ---------------------------------------------------------------------------
+
+export function mergeCatalogoEMercadosFromServer(
+  produtosDoServidor: { codigoEAN: string; descricao: string; marca: string; categoria: string; unidade: string; validadeMediaDias: number }[],
+  mercadosDoServidor: { id: string; nome: string; endereco: EnderecoEstoque }[],
+  empresaId = EMPRESA_PADRAO
+): void {
+  const data = getEstoqueData()
+  const empresa = data.empresas[empresaId] ?? criarEmpresaVazia(empresaId)
+
+  for (const p of produtosDoServidor) {
+    empresa.produtos[p.codigoEAN] = {
+      descricao: p.descricao,
+      marca: p.marca || 'Frutap',
+      categoria: p.categoria || '',
+      unidade: (p.unidade as CatalogoProduto['unidade']) || 'unidade',
+      validadeMediaDias: p.validadeMediaDias ?? CONFIGURACAO_PADRAO.validadeMediaDiasPadrao
+    }
+  }
+
+  for (const m of mercadosDoServidor) {
+    empresa.mercados[m.id] = { nome: m.nome, endereco: m.endereco }
+    if (!empresa.estoquePorMercado[m.id]) empresa.estoquePorMercado[m.id] = {}
+  }
+
+  data.empresas[empresaId] = empresa
+  salvarDataBruta(data)
+}
+
+// `saldosDoServidor` é a resposta crua de GET /api/estoque/<mercadoSlug>
+// (ver backend/app/estoque/routes.py) — já no formato {codigoEAN, produto:
+// {..., estoque}}, o mesmo que `listarProdutos` devolve localmente.
+export function mergeSaldosFromServer(
+  mercadoId: string,
+  saldosDoServidor: { codigoEAN: string; produto: { estoque: SaldoEstoque } }[],
+  empresaId = EMPRESA_PADRAO
+): void {
+  const data = getEstoqueData()
+  const empresa = data.empresas[empresaId]
+  if (!empresa) return
+
+  if (!empresa.estoquePorMercado[mercadoId]) empresa.estoquePorMercado[mercadoId] = {}
+  for (const item of saldosDoServidor) {
+    // Só grava se o servidor de fato já tem um saldo lançado pra esse
+    // produto nesse mercado (atualizadoEm vazio = nunca contado/lançado lá,
+    // igual ao "saldo ?? {quantidadeAtual: 0, ...}" que listarProdutos já
+    // usa) — senão zeraria silenciosamente um saldo só-local recém-digitado.
+    if (item.produto.estoque.atualizadoEm) {
+      empresa.estoquePorMercado[mercadoId][item.codigoEAN] = item.produto.estoque
+    }
+  }
+
+  data.empresas[empresaId] = empresa
+  salvarDataBruta(data)
+}
+
+// `avariasDoServidor` é a resposta crua de GET /api/avarias (ver
+// backend/app/avarias/routes.py) — já no mesmo formato de RegistroAvaria,
+// então o merge é direto: upsert por id. Preserva qualquer avaria só-local
+// que o servidor ainda não confirmou (ex.: lançada offline, fila de sync
+// ainda não processou) — mesma filosofia aditiva das outras merge*FromServer.
+export function mergeAvariasFromServer(
+  avariasDoServidor: RegistroAvaria[],
+  empresaId = EMPRESA_PADRAO
+): void {
+  const data = getEstoqueData()
+  const empresa = data.empresas[empresaId]
+  if (!empresa) return
+
+  const porId = new Map(empresa.avarias.map((a) => [a.id, a]))
+  for (const a of avariasDoServidor) {
+    porId.set(a.id, a)
+  }
+  empresa.avarias = Array.from(porId.values()).sort((a, b) => b.registradoEm.localeCompare(a.registradoEm))
+
+  data.empresas[empresaId] = empresa
+  salvarDataBruta(data)
 }
 
 // ---------------------------------------------------------------------------

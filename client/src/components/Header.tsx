@@ -1,14 +1,21 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'wouter'
-import { Menu, X, Sun, Moon, FileText, List, RefreshCw, Trash2, Dog, Zap, ClipboardList, PackageSearch } from 'lucide-react'
+import { Menu, X, Sun, Moon, FileText, List, RefreshCw, Trash2, Dog, Zap, ClipboardList, PackageSearch, LogOut, PackageX, ShieldAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useTheme } from '@/lib/theme-provider'
+import { SyncStatusIndicator } from '@/components/sync-status-indicator'
+import { assinarMudancasDeAuth, logout, obterUsuarioAtual } from '@/lib/apiClient'
 import instaLogo from '@assets/instagran.png'
 
 export function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const { theme, toggleTheme } = useTheme()
   const [location] = useLocation()
+  const [usuario, setUsuario] = useState(() => obterUsuarioAtual())
+
+  useEffect(() => {
+    return assinarMudancasDeAuth(() => setUsuario(obterUsuarioAtual()))
+  }, [])
 
   const navItems = [
     { path: '/', label: 'Registrar', icon: FileText },
@@ -17,8 +24,15 @@ export function Header() {
     { path: '/painel-sugestao', label: 'Sugestão de Pedido', icon: PackageSearch },
     { path: '/listar', label: 'Listar', icon: List },
     { path: '/atualizar', label: 'Atualizar', icon: RefreshCw },
-    { path: '/deletar', label: 'Deletar', icon: Trash2 }
+    { path: '/deletar', label: 'Deletar', icon: Trash2 },
+    { path: '/avarias', label: 'Avarias', icon: PackageX }
   ]
+
+  // Visível só pro perfil admin — mesma regra de acesso do servidor
+  // (login_obrigatorio(perfis=["admin"]) nas rotas que essa página usa).
+  if (usuario?.perfil === 'admin') {
+    navItems.push({ path: '/admin', label: 'Admin', icon: ShieldAlert })
+  }
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -55,8 +69,20 @@ export function Header() {
           </nav>
 
           <div className="flex items-center gap-2">
+            <SyncStatusIndicator />
+
+            {usuario && (
+              <span className="hidden lg:inline text-sm text-muted-foreground" data-testid="text-usuario-logado">
+                {usuario.nome}
+              </span>
+            )}
+
             <Button variant="ghost" size="icon" onClick={toggleTheme} data-testid="button-theme-toggle">
               {theme === 'light' ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
+            </Button>
+
+            <Button variant="ghost" size="icon" onClick={() => logout()} title="Sair" data-testid="button-logout">
+              <LogOut className="h-5 w-5" />
             </Button>
 
             <Button

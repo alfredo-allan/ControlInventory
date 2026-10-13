@@ -271,6 +271,27 @@
     @apply hidden;
   }
 
+  /* Esconde a seta de incremento/decremento nativa (spinner) de TODO
+     input[type="number"] do app, de uma vez só — pedido do usuário
+     (2026-10-13): "não mostrar nenhum campo de input com esse seletor
+     horrível". Sem isso, cada navegador desenha um controle diferente (as
+     setinhas do Chrome/Edge, o campo "textfield" mais limpo do Firefox só
+     depois dessa regra) que não combina com o resto do design system —
+     os campos continuam aceitando só números normalmente, só perdem esse
+     controle nativo. Cobre os 9 campos numéricos que já existem hoje
+     (Registrar, Atualizar, Pesquisa Semanal, Avarias, Painel de Sugestão,
+     Listar) e qualquer `type="number"` novo que entrar depois, sem
+     precisar de className em cada um. */
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
+
   /* Placeholder styling for contentEditable div */
   [contenteditable][data-placeholder]:empty::before {
     content: attr(data-placeholder);

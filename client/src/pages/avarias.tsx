@@ -8,6 +8,7 @@ import { Scanner } from '@yudiel/react-qr-scanner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { useToast } from '@/hooks/use-toast'
@@ -37,6 +38,7 @@ export default function AvariasPage() {
   const [codigoEAN, setCodigoEAN] = useState('')
   const [descricao, setDescricao] = useState('')
   const [quantidade, setQuantidade] = useState(1)
+  const [quantityType, setQuantityType] = useState<'unidade' | 'caixa'>('unidade')
   const [motivo, setMotivo] = useState('')
 
   // Mesmo padrão de montagem da Pesquisa Semanal: garante o mercado do Setup
@@ -79,6 +81,7 @@ export default function AvariasPage() {
     const encontrado = listarProdutos(mercadoId).find((p) => p.codigoEAN === ean)
     if (encontrado) {
       setDescricao(encontrado.produto.descricao)
+      setQuantityType(encontrado.produto.unidade)
       toast({ title: 'Produto encontrado!', description: encontrado.produto.descricao })
     } else {
       toast({
@@ -94,6 +97,7 @@ export default function AvariasPage() {
     setCodigoEAN('')
     setDescricao('')
     setQuantidade(1)
+    setQuantityType('unidade')
     setMotivo('')
   }
 
@@ -117,6 +121,7 @@ export default function AvariasPage() {
       codigoEAN: codigoEAN.trim(),
       descricao: descricao.trim(),
       quantidade,
+      quantityType,
       motivo: motivo.trim(),
       operador: operador || 'Operador',
       nomeCliente: quickSetup?.nomeCliente ?? '',
@@ -226,7 +231,7 @@ export default function AvariasPage() {
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-[1fr_1fr_2fr] gap-3">
             <Input
               type="number"
               min="1"
@@ -235,10 +240,20 @@ export default function AvariasPage() {
               onChange={(e) => setQuantidade(Math.max(1, parseInt(e.target.value, 10) || 1))}
               data-testid="input-quantidade-avaria"
             />
+            <Select value={quantityType} onValueChange={(v) => setQuantityType(v as 'unidade' | 'caixa')}>
+              <SelectTrigger data-testid="select-quantity-type-avaria">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="unidade">Unidade</SelectItem>
+                <SelectItem value="caixa">Caixa</SelectItem>
+              </SelectContent>
+            </Select>
             <Input
               placeholder="Motivo (ex.: avaria no transporte, embalagem rasgada...)"
               value={motivo}
               onChange={(e) => setMotivo(e.target.value)}
+              className="col-span-2 sm:col-span-1"
               data-testid="input-motivo-avaria"
             />
           </div>
@@ -276,9 +291,12 @@ export default function AvariasPage() {
                   <p className="font-medium text-foreground truncate">{a.descricao}</p>
                   <p className="text-xs text-muted-foreground font-mono">{a.codigoEAN}</p>
                 </div>
-                <Badge variant="destructive" className="shrink-0 gap-1">
+                {/* self-start: sem isso, a badge herda align-items:stretch do
+                    container flex-col no mobile e vira uma barra vermelha
+                    esticada a largura toda — feedback do usuário (2026-10-13). */}
+                <Badge variant="destructive" className="self-start shrink-0 gap-1">
                   <Trash2 className="h-3 w-3" />
-                  {a.quantidade}x
+                  {a.quantidade}x {a.quantityType === 'caixa' ? 'cx' : 'un'}
                 </Badge>
                 <div className="flex-1 min-w-0 text-sm text-muted-foreground truncate">{a.motivo}</div>
                 <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0">

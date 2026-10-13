@@ -18,7 +18,10 @@ import {
   Barcode,
   ArrowRightLeft,
   ClipboardList,
-  PackageX
+  PackageX,
+  KeyRound,
+  UserX,
+  UserCheck
 } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -29,6 +32,7 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -54,6 +58,7 @@ interface UsuarioItem {
   id: number
   nome: string
   perfil: 'admin' | 'operador'
+  ativo: boolean
   criadoEm: string | null
 }
 
@@ -147,6 +152,17 @@ export default function AdminPage() {
   const [erroUsuarios, setErroUsuarios] = useState<string | null>(null)
   const [mostrarSenha, setMostrarSenha] = useState(false)
 
+  // Trocar senha / desativar usuário (2026-10-13, pedido do usuário:
+  // "colocar o potencial do admin de trocar a senha e excluir usuários").
+  // "Excluir" é soft delete (ativo=false) — ver comentário em
+  // backend/app/models.py (Usuario.ativo) pro porquê.
+  const [usuarioTrocandoSenha, setUsuarioTrocandoSenha] = useState<UsuarioItem | null>(null)
+  const [novaSenha, setNovaSenha] = useState('')
+  const [mostrarNovaSenha, setMostrarNovaSenha] = useState(false)
+  const [salvandoSenha, setSalvandoSenha] = useState(false)
+  const [usuarioAlternandoAtivo, setUsuarioAlternandoAtivo] = useState<number | null>(null)
+  const [usuarioDesativando, setUsuarioDesativando] = useState<UsuarioItem | null>(null)
+
   const [operadores, setOperadores] = useState<string[]>([])
   const [carregandoOperadores, setCarregandoOperadores] = useState(false)
   const [erroOperadores, setErroOperadores] = useState<string | null>(null)
@@ -200,6 +216,68 @@ export default function AdminPage() {
         description: error instanceof Error ? error.message : 'Tente novamente.',
         variant: 'destructive'
       })
+    }
+  }
+
+  const onTrocarSenha = async () => {
+    if (!usuarioTrocandoSenha) return
+    if (novaSenha.length < 6) {
+      toast({ title: 'Senha muito curta', description: 'Use pelo menos 6 caracteres.', variant: 'destructive' })
+      return
+    }
+    setSalvandoSenha(true)
+    try {
+      const resposta = await apiFetch(`/api/auth/usuarios/${usuarioTrocandoSenha.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ senha: novaSenha })
+      })
+      if (!resposta.ok) {
+        const corpo = (await resposta.json().catch(() => ({}))) as { erro?: string }
+        throw new Error(corpo.erro || `Falha ao trocar senha (HTTP ${resposta.status}).`)
+      }
+      toast({ title: 'Senha atualizada!', description: `Nova senha definida para "${usuarioTrocandoSenha.nome}".` })
+      setUsuarioTrocandoSenha(null)
+      setNovaSenha('')
+      setMostrarNovaSenha(false)
+    } catch (error) {
+      toast({
+        title: 'Erro ao trocar senha',
+        description: error instanceof Error ? error.message : 'Tente novamente.',
+        variant: 'destructive'
+      })
+    } finally {
+      setSalvandoSenha(false)
+    }
+  }
+
+  // Reativar não precisa de confirmação (reversível, de baixo risco);
+  // desativar passa pelo AlertDialog abaixo porque trava o login do
+  // operador na hora.
+  const onAlternarAtivo = async (u: UsuarioItem, novoAtivo: boolean) => {
+    setUsuarioAlternandoAtivo(u.id)
+    try {
+      const resposta = await apiFetch(`/api/auth/usuarios/${u.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ ativo: novoAtivo })
+      })
+      if (!resposta.ok) {
+        const corpo = (await resposta.json().catch(() => ({}))) as { erro?: string }
+        throw new Error(corpo.erro || `Falha ao atualizar usuário (HTTP ${resposta.status}).`)
+      }
+      setUsuarios((atual) => atual.map((item) => (item.id === u.id ? { ...item, ativo: novoAtivo } : item)))
+      toast({
+        title: novoAtivo ? 'Usuário reativado' : 'Usuário desativado',
+        description: novoAtivo ? `"${u.nome}" já pode entrar novamente.` : `"${u.nome}" não consegue mais entrar no sistema.`
+      })
+    } catch (error) {
+      toast({
+        title: 'Erro ao atualizar usuário',
+        description: error instanceof Error ? error.message : 'Tente novamente.',
+        variant: 'destructive'
+      })
+    } finally {
+      setUsuarioAlternandoAtivo(null)
+      setUsuarioDesativando(null)
     }
   }
 
@@ -605,19 +683,79 @@ export default function AdminPage() {
               <p className="text-sm text-muted-foreground py-2">Nenhum usuário encontrado.</p>
             ) : (
               <div className="space-y-2 max-h-72 overflow-y-auto">
-                {usuarios.map((u) => (
-                  <div key={u.id} className="flex items-center justify-between text-sm border-b pb-2 last:border-0" data-testid={`row-usuario-${u.id}`}>
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="font-medium text-foreground truncate">{u.nome}</span>
-                      <Badge variant={u.perfil === 'admin' ? 'default' : 'secondary'} className="shrink-0">
-                        {u.perfil}
-                      </Badge>
+                {usuarios.map((u) => {
+                  const vocêMesmo = u.id === usuario?.id
+                  return (
+                    <div
+                      key={u.id}
+                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-sm border-b pb-2 last:border-0"
+                      data-testid={`row-usuario-${u.id}`}>
+                      <div className="flex flex-wrap items-center gap-2 min-w-0">
+                        <span className={`font-medium truncate ${u.ativo ? 'text-foreground' : 'text-muted-foreground line-through'}`}>
+                          {u.nome}
+                        </span>
+                        <Badge variant={u.perfil === 'admin' ? 'default' : 'secondary'} className="shrink-0">
+                          {u.perfil}
+                        </Badge>
+                        {!u.ativo && (
+                          <Badge variant="outline" className="shrink-0 text-muted-foreground">
+                            Desativado
+                          </Badge>
+                        )}
+                        {vocêMesmo && (
+                          <Badge variant="outline" className="shrink-0">
+                            Você
+                          </Badge>
+                        )}
+                        <span className="text-muted-foreground text-xs shrink-0">
+                          {u.criadoEm ? `desde ${format(parseISO(u.criadoEm), 'dd/MM/yyyy', { locale: ptBR })}` : '—'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0 self-end sm:self-auto">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="gap-1 text-muted-foreground"
+                          onClick={() => {
+                            setUsuarioTrocandoSenha(u)
+                            setNovaSenha('')
+                            setMostrarNovaSenha(false)
+                          }}
+                          data-testid={`button-trocar-senha-${u.id}`}>
+                          <KeyRound className="h-3.5 w-3.5" />
+                          Senha
+                        </Button>
+                        {u.ativo ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="gap-1 text-destructive hover:text-destructive"
+                            disabled={vocêMesmo || usuarioAlternandoAtivo === u.id}
+                            title={vocêMesmo ? 'Você não pode desativar seu próprio usuário' : undefined}
+                            onClick={() => setUsuarioDesativando(u)}
+                            data-testid={`button-desativar-${u.id}`}>
+                            {usuarioAlternandoAtivo === u.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserX className="h-3.5 w-3.5" />}
+                            Desativar
+                          </Button>
+                        ) : (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="gap-1 text-emerald-600 hover:text-emerald-600"
+                            disabled={usuarioAlternandoAtivo === u.id}
+                            onClick={() => void onAlternarAtivo(u, true)}
+                            data-testid={`button-reativar-${u.id}`}>
+                            {usuarioAlternandoAtivo === u.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserCheck className="h-3.5 w-3.5" />}
+                            Reativar
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                    <span className="text-muted-foreground text-xs shrink-0">
-                      {u.criadoEm ? `desde ${format(parseISO(u.criadoEm), 'dd/MM/yyyy', { locale: ptBR })}` : '—'}
-                    </span>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
@@ -672,6 +810,79 @@ export default function AdminPage() {
               data-testid="button-confirmar-limpar-logs">
               {limpando && <Loader2 className="h-4 w-4 animate-spin" />}
               Limpar definitivamente
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Trocar senha de um usuário (2026-10-13) */}
+      <Dialog
+        open={!!usuarioTrocandoSenha}
+        onOpenChange={(open) => {
+          if (!open) {
+            setUsuarioTrocandoSenha(null)
+            setNovaSenha('')
+            setMostrarNovaSenha(false)
+          }
+        }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Trocar senha</DialogTitle>
+            <DialogDescription>
+              Defina uma nova senha para <span className="font-medium text-foreground">{usuarioTrocandoSenha?.nome}</span>.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="relative">
+            <Input
+              type={mostrarNovaSenha ? 'text' : 'password'}
+              placeholder="Nova senha (mín. 6 caracteres)"
+              value={novaSenha}
+              onChange={(e) => setNovaSenha(e.target.value)}
+              className="pr-10"
+              data-testid="input-nova-senha"
+            />
+            <button
+              type="button"
+              onClick={() => setMostrarNovaSenha((v) => !v)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              aria-label={mostrarNovaSenha ? 'Esconder senha' : 'Mostrar senha'}>
+              {mostrarNovaSenha ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUsuarioTrocandoSenha(null)} disabled={salvandoSenha}>
+              Cancelar
+            </Button>
+            <Button onClick={() => void onTrocarSenha()} disabled={salvandoSenha} className="gap-2" data-testid="button-confirmar-nova-senha">
+              {salvandoSenha && <Loader2 className="h-4 w-4 animate-spin" />}
+              Salvar nova senha
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirmar desativação de usuário (2026-10-13) — reversível (dá pra
+          reativar depois), mas trava o login na hora, por isso pede
+          confirmação em vez de ser um clique só como o reativar. */}
+      <AlertDialog open={!!usuarioDesativando} onOpenChange={(open) => !open && setUsuarioDesativando(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Desativar "{usuarioDesativando?.nome}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esse usuário não vai mais conseguir entrar no sistema até alguém reativá-lo. O histórico de login e de
+              atividade dele continua intacto — isso não apaga nada, só bloqueia o acesso.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <Button
+              variant="destructive"
+              className="gap-2"
+              disabled={usuarioAlternandoAtivo === usuarioDesativando?.id}
+              onClick={() => usuarioDesativando && void onAlternarAtivo(usuarioDesativando, false)}
+              data-testid="button-confirmar-desativar">
+              {usuarioAlternandoAtivo === usuarioDesativando?.id && <Loader2 className="h-4 w-4 animate-spin" />}
+              Desativar
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

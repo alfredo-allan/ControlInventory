@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, Link } from 'wouter'
 import {
   ClipboardList,
-  ChevronUp,
-  ChevronDown,
+  Minus,
+  Plus,
   AlertTriangle,
   Info,
   PackagePlus,
@@ -150,7 +150,19 @@ export default function PesquisaSemanalPage() {
       const divergencia = quantidadeContada - quantidadeEsperada
       const divergenciaGrande =
         quantidadeEsperada === 0 ? quantidadeContada > 0 : Math.abs(divergencia) / Math.max(quantidadeEsperada, 1) > 0.2
-      return { codigoEAN, descricao: produto.descricao, quantidadeEsperada, quantidadeContada, divergencia, divergenciaGrande }
+      return {
+        codigoEAN,
+        descricao: produto.descricao,
+        quantidadeEsperada,
+        quantidadeContada,
+        divergencia,
+        divergenciaGrande,
+        // Unidade já é um atributo do produto no catálogo (definido no
+        // cadastro, Registrar Produto) — a contagem semanal só herda e
+        // mostra, não deixa escolher de novo (senão um mesmo produto
+        // podia virar "caixa" numa semana e "unidade" na outra).
+        unidade: produto.unidade
+      }
     })
   }, [produtos, contagens])
 
@@ -277,7 +289,11 @@ export default function PesquisaSemanalPage() {
     salvarPesquisaSemanal({
       mercadoId,
       operador: operador || 'Operador',
-      itens: itensComDivergencia.map((item) => ({ codigoEAN: item.codigoEAN, quantidadeContada: item.quantidadeContada }))
+      itens: itensComDivergencia.map((item) => ({
+        codigoEAN: item.codigoEAN,
+        quantidadeContada: item.quantidadeContada,
+        quantityType: item.unidade
+      }))
     })
 
     toast({
@@ -399,19 +415,27 @@ export default function PesquisaSemanalPage() {
                   <p className="font-medium text-foreground truncate">{item.descricao}</p>
                   <p className="text-xs text-muted-foreground font-mono">{item.codigoEAN}</p>
                 </div>
-                <div className="text-xs text-muted-foreground shrink-0">Esperado: {item.quantidadeEsperada}</div>
+                <div className="text-xs text-muted-foreground shrink-0">
+                  Esperado: {item.quantidadeEsperada} {item.unidade === 'caixa' ? 'cx' : 'un'}
+                </div>
 
-                {/* Seletor de quantidade — um único controle integrado (input +
-                    setas acopladas), em vez de botões Minus/Plus soltos ao lado
-                    da seta nativa do navegador (que duplicavam a mesma ação e
-                    deixavam a linha poluída). As setas nativas do input number
-                    ficam escondidas via CSS; estas aqui são as únicas visíveis. */}
+                {/* Stepper horizontal (-  valor  +) com botões de 36px — o
+                    design anterior (setas empilhadas de 17px de altura) era
+                    preciso demais pra mouse e quase impossível de acertar
+                    com o dedo no mobile. Feedback do usuário (2026-10-13). */}
                 <div className="flex items-stretch rounded-md border border-input bg-background shrink-0 overflow-hidden">
+                  <button
+                    type="button"
+                    aria-label="Diminuir quantidade"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground active:bg-accent"
+                    onClick={() => ajustarContagem(item.codigoEAN, -1)}>
+                    <Minus className="h-4 w-4" />
+                  </button>
                   <Input
                     type="number"
                     min="0"
                     inputMode="numeric"
-                    className="w-14 border-0 rounded-none text-center focus-visible:ring-0 focus-visible:ring-offset-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    className="w-12 border-0 border-x border-input rounded-none text-center px-1 focus-visible:ring-0 focus-visible:ring-offset-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     value={contagens[item.codigoEAN] ?? 0}
                     onChange={(e) =>
                       setContagens((atual) => ({ ...atual, [item.codigoEAN]: Math.max(0, parseInt(e.target.value, 10) || 0) }))
@@ -421,28 +445,22 @@ export default function PesquisaSemanalPage() {
                     }}
                     data-testid={`input-contagem-${item.codigoEAN}`}
                   />
-                  <div className="flex flex-col border-l border-input">
-                    <button
-                      type="button"
-                      aria-label="Aumentar quantidade"
-                      className="flex h-[17px] w-6 items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground"
-                      onClick={() => ajustarContagem(item.codigoEAN, 1)}>
-                      <ChevronUp className="h-3 w-3" />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="Diminuir quantidade"
-                      className="flex h-[17px] w-6 items-center justify-center border-t border-input text-muted-foreground hover:bg-accent hover:text-foreground"
-                      onClick={() => ajustarContagem(item.codigoEAN, -1)}>
-                      <ChevronDown className="h-3 w-3" />
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    aria-label="Aumentar quantidade"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground active:bg-accent"
+                    onClick={() => ajustarContagem(item.codigoEAN, 1)}>
+                    <Plus className="h-4 w-4" />
+                  </button>
                 </div>
 
                 {/* Preço (R$) — fica escondido por padrão pra não poluir o catálogo
                     inteiro; aparece quando o item é escaneado ou quando o operador
                     clica pra informar manualmente. Máscara de centavos + feedback
-                    de salvamento (spinner -> check) ao perder o foco. */}
+                    de salvamento (spinner -> check) ao perder o foco. O estado
+                    "fechado" usa o MESMO tamanho/alinhamento/borda do estado
+                    "aberto" (antes era um botão ghost sem borda, que não parecia
+                    um campo clicável — feedback do usuário, 2026-10-13). */}
                 {precoVisivel ? (
                   <div className="relative shrink-0 w-28">
                     <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
@@ -466,20 +484,18 @@ export default function PesquisaSemanalPage() {
                     )}
                   </div>
                 ) : (
-                  <Button
+                  <button
                     type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="shrink-0 gap-1 text-muted-foreground"
                     onClick={() => revelarPreco(item.codigoEAN)}
-                    data-testid={`button-preco-${item.codigoEAN}`}>
-                    <DollarSign className="h-3.5 w-3.5" />
+                    data-testid={`button-preco-${item.codigoEAN}`}
+                    className="relative shrink-0 w-28 h-9 rounded-md border border-input bg-background px-2.5 flex items-center justify-end gap-1 text-sm text-muted-foreground hover:bg-accent hover:text-foreground">
+                    <DollarSign className="h-3.5 w-3.5 absolute left-2.5" />
                     {precoAtual > 0 ? formatarPreco(precoAtual) : 'Preço'}
-                  </Button>
+                  </button>
                 )}
 
                 {item.divergenciaGrande && (
-                  <Badge variant="destructive" className="shrink-0 gap-1">
+                  <Badge variant="destructive" className="self-start shrink-0 gap-1">
                     <AlertTriangle className="h-3 w-3" />
                     {item.divergencia > 0 ? '+' : ''}
                     {item.divergencia}

@@ -82,6 +82,7 @@ export interface PesquisaSemanalItem {
   quantidadeEsperada: number
   quantidadeContada: number
   divergencia: number
+  quantityType: 'unidade' | 'caixa' // 2026-10-13 — mesmo padrão de Registrar Produto
 }
 
 export interface PesquisaSemanal {
@@ -105,6 +106,7 @@ export interface RegistroAvaria {
   codigoEAN: string
   descricao: string
   quantidade: number
+  quantityType: 'unidade' | 'caixa' // 2026-10-13 — mesmo padrão de Registrar Produto
   motivo: string // texto livre, opcional ("quebrou no transporte", etc.)
   operador: string
   nomeCliente: string
@@ -600,7 +602,7 @@ export function registrarMovimentacao(params: {
 export function salvarPesquisaSemanal(params: {
   mercadoId: string
   operador: string
-  itens: { codigoEAN: string; quantidadeContada: number }[]
+  itens: { codigoEAN: string; quantidadeContada: number; quantityType?: 'unidade' | 'caixa' }[]
   empresaId?: string
 }): PesquisaSemanal | null {
   const empresaId = params.empresaId ?? EMPRESA_PADRAO
@@ -614,7 +616,7 @@ export function salvarPesquisaSemanal(params: {
   const agora = new Date().toISOString()
   const cicloId = getCicloIdAtual()
 
-  const itensRegistrados: PesquisaSemanalItem[] = params.itens.map(({ codigoEAN, quantidadeContada }) => {
+  const itensRegistrados: PesquisaSemanalItem[] = params.itens.map(({ codigoEAN, quantidadeContada, quantityType }) => {
     const saldoAnterior = saldos[codigoEAN]
     const quantidadeEsperada = saldoAnterior?.quantidadeAtual ?? 0
     const divergencia = quantidadeContada - quantidadeEsperada
@@ -640,7 +642,7 @@ export function salvarPesquisaSemanal(params: {
       precoUnitario: saldoAnterior?.precoUnitario
     }
 
-    return { codigoEAN, quantidadeEsperada, quantidadeContada, divergencia }
+    return { codigoEAN, quantidadeEsperada, quantidadeContada, divergencia, quantityType: quantityType ?? 'unidade' }
   })
 
   const pesquisa: PesquisaSemanal = {
@@ -677,6 +679,7 @@ export function registrarAvaria(params: {
   codigoEAN: string
   descricao: string
   quantidade: number
+  quantityType?: 'unidade' | 'caixa'
   motivo: string
   operador: string
   nomeCliente: string
@@ -695,6 +698,7 @@ export function registrarAvaria(params: {
     codigoEAN: params.codigoEAN,
     descricao: params.descricao,
     quantidade: params.quantidade,
+    quantityType: params.quantityType ?? 'unidade',
     motivo: params.motivo,
     operador: params.operador,
     nomeCliente: params.nomeCliente,

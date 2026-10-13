@@ -740,6 +740,19 @@ export function registrarAvaria(params: {
   return registro
 }
 
+// Excluir um registro de avaria individual (admin, 2026-10-13) — espelha
+// localmente o que o backend acabou de apagar de verdade
+// (DELETE /api/avarias/<id>). Decisão deliberada (ver AskUserQuestion
+// registrado em claude/arquitetura-modulo-estoque.md, v2.11.1): NÃO mexe
+// no saldo nem na movimentação já lançada — só remove o registro/log.
+export function excluirAvariaLocal(avariaId: string, empresaId = EMPRESA_PADRAO): void {
+  const data = getEstoqueData()
+  const empresa = data.empresas[empresaId]
+  if (!empresa) return
+  empresa.avarias = empresa.avarias.filter((a) => a.id !== avariaId)
+  salvarDataBruta(data)
+}
+
 // "Limpar todos os logs" (admin) — espelha localmente o que o backend
 // acabou de apagar de verdade (POST /api/admin/logs/limpar): avarias,
 // movimentações e pesquisas semanais somem também daqui, senão o app

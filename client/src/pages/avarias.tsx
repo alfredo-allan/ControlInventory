@@ -11,6 +11,15 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from '@/components/ui/alert-dialog'
 import { useToast } from '@/hooks/use-toast'
 import { useBarcodeScanner } from '@/hooks/use-barcode-scanner'
 import { quickSetupStorage } from '@/lib/quickSetup'
@@ -21,19 +30,23 @@ import {
   listarProdutos,
   listarAvarias,
   registrarAvaria,
+  excluirAvariaLocal,
   type RegistroAvaria
 } from '@/lib/estoqueStorage'
 import { puxarDoServidor } from '@/lib/pullSync'
-import { baixarArquivo, ErroNaoAutenticado } from '@/lib/apiClient'
+import { baixarArquivo, apiFetch, obterUsuarioAtual, ErroNaoAutenticado } from '@/lib/apiClient'
 
 export default function AvariasPage() {
   const { toast } = useToast()
   const quickSetup = quickSetupStorage.get()
   const operador = quickSetup?.operatorName ?? ''
+  const ehAdmin = obterUsuarioAtual()?.perfil === 'admin'
 
   const [mercadoId, setMercadoId] = useState<string>('')
   const [avarias, setAvarias] = useState<RegistroAvaria[]>([])
   const [baixandoRelatorio, setBaixandoRelatorio] = useState(false)
+  const [avariaParaExcluir, setAvariaParaExcluir] = useState<RegistroAvaria | null>(null)
+  const [excluindoAvaria, setExcluindoAvaria] = useState(false)
 
   const [codigoEAN, setCodigoEAN] = useState('')
   const [descricao, setDescricao] = useState('')
@@ -136,6 +149,34 @@ export default function AvariasPage() {
     toast({ title: 'Avaria registrada!', description: `${registro.quantidade}x ${registro.descricao} — estoque já abatido.` })
     setAvarias(listarAvarias())
     limparFormulario()
+  }
+
+  // Excluir um registro individual (admin-only — ver badge na lista
+  // abaixo). Decisão deliberada: NÃO devolve a quantidade ao estoque, só
+  // remove o registro/log (2026-10-13, ver AskUserQuestion em
+  // claude/arquitetura-modulo-estoque.md).
+  const handleExcluirAvaria = async () => {
+    if (!avariaParaExcluir) return
+    setExcluindoAvaria(true)
+    try {
+      const resposta = await apiFetch(`/api/avarias/${avariaParaExcluir.id}`, { method: 'DELETE' })
+      if (!resposta.ok) {
+        const corpo = (await resposta.json().catch(() => ({}))) as { erro?: string }
+        throw new Error(corpo.erro || `Falha ao excluir (HTTP ${resposta.status}).`)
+      }
+      excluirAvariaLocal(avariaParaExcluir.id)
+      setAvarias(listarAvarias())
+      toast({ title: 'Registro excluído', description: 'O estoque não foi alterado — só o registro foi removido.' })
+      setAvariaParaExcluir(null)
+    } catch (error) {
+      toast({
+        title: 'Erro ao excluir',
+        description: error instanceof ErroNaoAutenticado ? 'Sessão expirada. Faça login novamente.' : error instanceof Error ? error.message : 'Tente novamente.',
+        variant: 'destructive'
+      })
+    } finally {
+      setExcluindoAvaria(false)
+    }
   }
 
   const handleBaixarRelatorio = async () => {
@@ -293,11 +334,29 @@ export default function AvariasPage() {
                 </div>
                 {/* self-start: sem isso, a badge herda align-items:stretch do
                     container flex-col no mobile e vira uma barra vermelha
-                    esticada a largura toda — feedback do usuário (2026-10-13). */}
-                <Badge variant="destructive" className="self-start shrink-0 gap-1">
-                  <Trash2 className="h-3 w-3" />
-                  {a.quantidade}x {a.quantityType === 'caixa' ? 'cx' : 'un'}
-                </Badge>
+                    esticada a largura toda — feedback do usuário (2026-10-13).
+                    Pra admin, a badge agora também é clicável e exclui o
+                    registro — antes o ícone de lixeira era só decorativo
+                    (indicava "avaria", não uma ação), e o usuário esperava
+                    que clicar nela apagasse o registro. */}
+                {ehAdmin ? (
+                  <button
+                    type="button"
+                    onClick={() => setAvariaParaExcluir(a)}
+                    className="self-start shrink-0"
+                    data-testid={`button-excluir-avaria-${a.id}`}
+                    aria-label="Excluir este registro de avaria">
+                    <Badge variant="destructive" className="gap-1 cursor-pointer hover:opacity-80 transition-opacity">
+                      <Trash2 className="h-3 w-3" />
+                      {a.quantidade}x {a.quantityType === 'caixa' ? 'cx' : 'un'}
+                    </Badge>
+                  </button>
+                ) : (
+                  <Badge variant="destructive" className="self-start shrink-0 gap-1">
+                    <Trash2 className="h-3 w-3" />
+                    {a.quantidade}x {a.quantityType === 'caixa' ? 'cx' : 'un'}
+                  </Badge>
+                )}
                 <div className="flex-1 min-w-0 text-sm text-muted-foreground truncate">{a.motivo}</div>
                 <div className="flex items-center gap-1 text-xs text-muted-foreground shrink-0">
                   <User className="h-3 w-3" />
@@ -338,6 +397,31 @@ export default function AvariasPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Confirmar exclusão de um registro de avaria (admin-only, 2026-10-13) */}
+      <AlertDialog open={!!avariaParaExcluir} onOpenChange={(open) => !open && setAvariaParaExcluir(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir este registro de avaria?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {avariaParaExcluir && (
+                <>
+                  "{avariaParaExcluir.descricao}" — {avariaParaExcluir.quantidade}x{' '}
+                  {avariaParaExcluir.quantityType === 'caixa' ? 'cx' : 'un'}.{' '}
+                </>
+              )}
+              Isso remove só o registro/log — a quantidade já abatida do estoque não é devolvida.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={excluindoAvaria}>Cancelar</AlertDialogCancel>
+            <Button variant="destructive" className="gap-2" disabled={excluindoAvaria} onClick={() => void handleExcluirAvaria()} data-testid="button-confirmar-excluir-avaria">
+              {excluindoAvaria && <Loader2 className="h-4 w-4 animate-spin" />}
+              Excluir
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

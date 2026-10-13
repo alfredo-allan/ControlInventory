@@ -8,6 +8,8 @@ import {
   FileDown,
   Loader2,
   LogIn,
+  ChevronDown,
+  ChevronUp,
   Trash2,
   AlertTriangle,
   UserPlus,
@@ -140,6 +142,10 @@ export default function AdminPage() {
   const [logins, setLogins] = useState<LoginLogItem[]>([])
   const [carregandoLogins, setCarregandoLogins] = useState(false)
   const [erroLogins, setErroLogins] = useState<string | null>(null)
+  // Recolhida por padrão (2026-10-13, feedback do usuário: a lista de 200
+  // logins estava poluindo a tela do Admin com entradas repetidas) — quem
+  // quiser ver clica pra expandir.
+  const [historicoLoginAberto, setHistoricoLoginAberto] = useState(false)
 
   const [baixandoRelatorio, setBaixandoRelatorio] = useState(false)
 
@@ -447,42 +453,60 @@ export default function AdminPage() {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <LogIn className="h-5 w-5" />
-            Histórico de login
-          </CardTitle>
-          <CardDescription>Quem entrou na aplicação e quando — últimos 200 registros.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {carregandoLogins ? (
-            <div className="flex items-center justify-center py-8 text-muted-foreground gap-2">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Carregando...
+        <button
+          type="button"
+          className="w-full text-left"
+          onClick={() => setHistoricoLoginAberto((v) => !v)}
+          data-testid="button-toggle-historico-login">
+          <CardHeader className="flex-row items-center justify-between space-y-0">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <LogIn className="h-5 w-5" />
+                Histórico de login
+              </CardTitle>
+              <CardDescription>
+                Quem entrou na aplicação e quando — últimos 200 registros.
+                {!historicoLoginAberto && !carregandoLogins && logins.length > 0 && ` ${logins.length} carregados.`}
+              </CardDescription>
             </div>
-          ) : erroLogins ? (
-            <p className="text-sm text-destructive py-4 text-center">{erroLogins}</p>
-          ) : logins.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">Nenhum login registrado ainda.</p>
-          ) : (
-            <div className="space-y-2 max-h-96 overflow-y-auto">
-              {logins.map((log) => (
-                <div key={log.id} className="flex items-center justify-between text-sm border-b pb-2 last:border-0" data-testid={`row-login-${log.id}`}>
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="font-medium text-foreground truncate">{log.nome}</span>
-                    <Badge variant={log.perfil === 'admin' ? 'default' : 'secondary'} className="shrink-0">
-                      {log.perfil}
-                    </Badge>
+            {historicoLoginAberto ? (
+              <ChevronUp className="h-5 w-5 text-muted-foreground shrink-0" />
+            ) : (
+              <ChevronDown className="h-5 w-5 text-muted-foreground shrink-0" />
+            )}
+          </CardHeader>
+        </button>
+        {historicoLoginAberto && (
+          <CardContent>
+            {carregandoLogins ? (
+              <div className="flex items-center justify-center py-8 text-muted-foreground gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Carregando...
+              </div>
+            ) : erroLogins ? (
+              <p className="text-sm text-destructive py-4 text-center">{erroLogins}</p>
+            ) : logins.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">Nenhum login registrado ainda.</p>
+            ) : (
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {logins.map((log) => (
+                  <div key={log.id} className="flex items-center justify-between text-sm border-b pb-2 last:border-0" data-testid={`row-login-${log.id}`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-medium text-foreground truncate">{log.nome}</span>
+                      <Badge variant={log.perfil === 'admin' ? 'default' : 'secondary'} className="shrink-0">
+                        {log.perfil}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0 text-muted-foreground text-xs">
+                      {log.ip && <span className="font-mono">{log.ip}</span>}
+                      <span>{log.logadoEm ? format(parseISO(log.logadoEm), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR }) : '—'}</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3 shrink-0 text-muted-foreground text-xs">
-                    {log.ip && <span className="font-mono">{log.ip}</span>}
-                    <span>{log.logadoEm ? format(parseISO(log.logadoEm), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR }) : '—'}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        )}
       </Card>
 
       <Card>

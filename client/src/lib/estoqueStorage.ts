@@ -127,6 +127,10 @@ export interface PedidoItem {
   codigoEAN: string
   cicloId: string
   quantidade: number
+  // 'unidade' | 'caixa' (2026-10-14) — faltava desde a criação do Giro
+  // Registrado: dava pra escolher na Pesquisa Semanal, mas a "Qtd. a
+  // pedir" sempre assumia 'unidade' por não ter onde guardar a escolha.
+  quantityType: 'unidade' | 'caixa'
   operador: string
   atualizadoEm: string // ISO datetime
 }
@@ -909,6 +913,7 @@ export function definirQuantidadePedido(params: {
   operador: string
   cicloId?: string
   empresaId?: string
+  quantityType?: 'unidade' | 'caixa'
 }): PedidoItem {
   const empresaId = params.empresaId ?? EMPRESA_PADRAO
   const cicloId = params.cicloId ?? getCicloIdAtual()
@@ -919,15 +924,21 @@ export function definirQuantidadePedido(params: {
     (p) => p.mercadoId === params.mercadoId && p.codigoEAN === params.codigoEAN && p.cicloId === cicloId
   )
 
+  // Se o chamador não passar `quantityType` explicitamente, mantém o que já
+  // estava salvo pra esse item (edição só da quantidade) — e só cai pra
+  // 'unidade' quando o item é novo e realmente não veio nada.
+  const quantityType = params.quantityType ?? existente?.quantityType ?? 'unidade'
+
   const agora = new Date().toISOString()
   const registro: PedidoItem = existente
-    ? { ...existente, quantidade: params.quantidade, operador: params.operador, atualizadoEm: agora }
+    ? { ...existente, quantidade: params.quantidade, quantityType, operador: params.operador, atualizadoEm: agora }
     : {
         id: crypto.randomUUID(),
         mercadoId: params.mercadoId,
         codigoEAN: params.codigoEAN,
         cicloId,
         quantidade: params.quantidade,
+        quantityType,
         operador: params.operador,
         atualizadoEm: agora
       }

@@ -28,7 +28,6 @@ import {
   getConfiguracao,
   salvarConfiguracao,
   encontrarMercadoPorNome,
-  exportarEstoqueJson,
   listarPedidos,
   definirQuantidadePedido,
   removerQuantidadePedido,
@@ -39,6 +38,8 @@ import {
 import { assinarMudancasDoPull } from '@/lib/pullSync'
 import { agruparPorCategoria } from '@/lib/categorias'
 import { calcularSugestaoCompleta, calcularResumoPerdas, serieDiariaDeSaidas, type ResultadoSugestao } from '@/lib/estoqueAnalytics'
+import { baixarArquivo, ErroNaoAutenticado } from '@/lib/apiClient'
+import { useToast } from '@/hooks/use-toast'
 
 type Periodo = 'diario' | 'semanal' | 'mensal'
 
@@ -79,12 +80,16 @@ function TabelaProdutos({
   mensagemVazia,
   onAbrirProduto,
   onDefinirPedido,
+  onAlterarUnidade,
+  unidadesPedido,
   pedidosVersion
 }: {
   grupos: { categoria: string; itens: LinhaProduto[] }[]
   mensagemVazia: string
   onAbrirProduto: (linha: LinhaProduto) => void
   onDefinirPedido: (codigoEAN: string, valor: string) => void
+  onAlterarUnidade: (codigoEAN: string, quantityType: 'unidade' | 'caixa') => void
+  unidadesPedido: Record<string, 'unidade' | 'caixa'>
   pedidosVersion: number
 }) {
   const totalItens = grupos.reduce((s, g) => s + g.itens.length, 0)
@@ -132,21 +137,40 @@ function TabelaProdutos({
                 </td>
                 <td className="py-3 pr-4 font-medium">{linha.resultado.sugestaoPedido}</td>
                 <td className="py-3 pr-4" onClick={(e) => e.stopPropagation()}>
-                  <Input
-                    key={`${linha.codigoEAN}-${linha.pedido?.atualizadoEm ?? 'vazio'}-${pedidosVersion}`}
-                    type="number"
-                    min="0"
-                    inputMode="numeric"
-                    className="w-20 h-8"
-                    defaultValue={linha.pedido ? linha.pedido.quantidade : ''}
-                    placeholder="—"
-                    onFocus={(e) => e.target.select()}
-                    onBlur={(e) => onDefinirPedido(linha.codigoEAN, e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-                    }}
-                    data-testid={`input-quantidade-pedido-${linha.codigoEAN}`}
-                  />
+                  {/* Unidade/Caixa da "Qtd. a pedir" — faltava aqui (só
+                      existia na Pesquisa Semanal), sempre gravava como
+                      'unidade' por padrão. Default: o que já foi salvo pro
+                      pedido, senão o que o operador escolheu nesta tela
+                      ainda sem salvar, senão o padrão do catálogo. Pedido
+                      do usuário (2026-10-14). */}
+                  <div className="flex items-center gap-1.5">
+                    <Input
+                      key={`${linha.codigoEAN}-${linha.pedido?.atualizadoEm ?? 'vazio'}-${pedidosVersion}`}
+                      type="number"
+                      min="0"
+                      inputMode="numeric"
+                      className="w-16 h-8"
+                      defaultValue={linha.pedido ? linha.pedido.quantidade : ''}
+                      placeholder="—"
+                      onFocus={(e) => e.target.select()}
+                      onBlur={(e) => onDefinirPedido(linha.codigoEAN, e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                      }}
+                      data-testid={`input-quantidade-pedido-${linha.codigoEAN}`}
+                    />
+                    <Select
+                      value={unidadesPedido[linha.codigoEAN] ?? linha.pedido?.quantityType ?? linha.produto.unidade}
+                      onValueChange={(v) => onAlterarUnidade(linha.codigoEAN, v as 'unidade' | 'caixa')}>
+                      <SelectTrigger className="h-8 w-16 px-1.5 text-xs gap-1" data-testid={`select-unidade-pedido-${linha.codigoEAN}`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unidade">un</SelectItem>
+                        <SelectItem value="caixa">cx</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </td>
                 <td className="py-3 pr-4">{tendenciaIcone(linha.resultado.tendencia)}</td>
                 <td className="py-3 pr-4">
@@ -165,6 +189,7 @@ function TabelaProdutos({
 }
 
 export default function PainelSugestaoPage() {
+  const { toast } = useToast()
   const quickSetup = quickSetupStorage.get()
   const mercados = listarMercados()
   const operador = quickSetup?.operatorName ?? 'Operador'
@@ -180,8 +205,16 @@ export default function PainelSugestaoPage() {
   // `pedidosPorEAN` (e por tabela, a reordenação "preenchido primeiro") a
   // reler o storage.
   const [pedidosVersion, setPedidosVersion] = useState(0)
+  // Unidade/Caixa escolhida pro item ainda SEM "Qtd. a pedir" preenchida —
+  // só guarda a intenção do operador até ele digitar uma quantidade (criar
+  // uma linha de PedidoItem só pela escolha de unidade violaria a regra de
+  // "linha existir = preenchido"). Depois de preenchido, a fonte de verdade
+  // vira `linha.pedido.quantityType` (já vem do storage/servidor).
+  const [unidadesPedido, setUnidadesPedido] = useState<Record<string, 'unidade' | 'caixa'>>({})
+  const [baixandoRelatorioGiro, setBaixandoRelatorioGiro] = useState(false)
 
   useEffect(() => assinarMudancasDoPull(() => setPedidosVersion((v) => v + 1)), [])
+  useEffect(() => setUnidadesPedido({}), [mercadoId])
 
   const movimentacoes = useMemo(() => getMovimentacoes(), [mercadoId])
   const produtos = useMemo(() => (mercadoId ? listarProdutos(mercadoId) : []), [mercadoId])
@@ -242,9 +275,61 @@ export default function PainelSugestaoPage() {
         setPedidosVersion((v) => v + 1)
         return
       }
-      definirQuantidadePedido({ mercadoId, codigoEAN, quantidade, operador, cicloId: cicloAtual })
+      definirQuantidadePedido({
+        mercadoId,
+        codigoEAN,
+        quantidade,
+        operador,
+        cicloId: cicloAtual,
+        quantityType: unidadesPedido[codigoEAN]
+      })
     }
     setPedidosVersion((v) => v + 1)
+  }
+
+  // Troca de Unidade/Caixa — se o item já tem "Qtd. a pedir" preenchida,
+  // regrava na hora (mesma quantidade, unidade nova). Se ainda não tem, só
+  // guarda a escolha em `unidadesPedido` pro próximo blur do campo de
+  // quantidade usar. Pedido do usuário (2026-10-14).
+  const handleAlterarUnidadePedido = (codigoEAN: string, quantityType: 'unidade' | 'caixa') => {
+    setUnidadesPedido((atual) => ({ ...atual, [codigoEAN]: quantityType }))
+    const pedidoExistente = mercadoId ? pedidosPorEAN.get(codigoEAN) : undefined
+    if (!mercadoId || !pedidoExistente) return
+    definirQuantidadePedido({
+      mercadoId,
+      codigoEAN,
+      quantidade: pedidoExistente.quantidade,
+      operador,
+      cicloId: cicloAtual,
+      quantityType
+    })
+    setPedidosVersion((v) => v + 1)
+  }
+
+  // Relatório do Giro Registrado em .docx — GERADO NO BACKEND (não no
+  // navegador): é lá que mora o dado de verdade, cross-dispositivo (mesmo
+  // padrão já usado em /api/relatorios/avarias.docx e /perdas.docx). Um
+  // relatório montado só com o que ESTE aparelho sincronizou localmente
+  // poderia ficar incompleto se outro operador preencheu algo no celular
+  // dele que ainda não chegou aqui. Escopo: um mercado, um ciclo — reflexo
+  // desta aba, não o estoque inteiro de todos os clientes misturados (era
+  // isso que o antigo "Baixar JSON" fazia). Pedido do usuário (2026-10-14).
+  const handleExportarGiroDocx = async () => {
+    if (!mercadoId) return
+    setBaixandoRelatorioGiro(true)
+    try {
+      const params = new URLSearchParams({ mercadoId, cicloId: cicloAtual })
+      await baixarArquivo(`/api/relatorios/giro-registrado.docx?${params}`, `giro-registrado-${cicloAtual}.docx`)
+    } catch (error) {
+      toast({
+        title: 'Erro ao baixar relatório',
+        description:
+          error instanceof ErroNaoAutenticado ? 'Sessão expirada. Faça login novamente.' : 'Verifique sua conexão e tente novamente.',
+        variant: 'destructive'
+      })
+    } finally {
+      setBaixandoRelatorioGiro(false)
+    }
   }
 
   const resumoPerdas = useMemo(
@@ -395,6 +480,8 @@ export default function PainelSugestaoPage() {
                 mensagemVazia="Nenhum produto monitorado neste mercado ainda — use a Pesquisa Semanal pra começar."
                 onAbrirProduto={setProdutoSelecionado}
                 onDefinirPedido={handleDefinirPedido}
+                onAlterarUnidade={handleAlterarUnidadePedido}
+                unidadesPedido={unidadesPedido}
                 pedidosVersion={pedidosVersion}
               />
             </CardContent>
@@ -404,11 +491,31 @@ export default function PainelSugestaoPage() {
         <TabsContent value="giro">
           <Card>
             <CardHeader>
-              <CardTitle>Giro registrado neste ciclo</CardTitle>
-              <CardDescription>
-                Só os produtos com "Qtd. a pedir" já preenchida neste ciclo ({cicloAtual}) — inclusive ruptura
-                (quantidade 0). Cresce automaticamente conforme novos itens vão sendo preenchidos.
-              </CardDescription>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <CardTitle>Giro registrado neste ciclo</CardTitle>
+                  <CardDescription>
+                    Só os produtos com "Qtd. a pedir" já preenchida neste ciclo ({cicloAtual}) — inclusive ruptura
+                    (quantidade 0). Cresce automaticamente conforme novos itens vão sendo preenchidos.
+                  </CardDescription>
+                </div>
+                {/* Relatório .docx deste mercado/ciclo — pedido do usuário
+                    (2026-10-14): antes só existia o "Baixar JSON do estoque",
+                    que misturava TODOS os clientes num arquivo só, difícil
+                    de ler. Esse aqui é só o que está na tela agora: um
+                    produto por linha, sem tabela/coluna (pra não quebrar
+                    estranho ao abrir no Word). */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2 shrink-0"
+                  onClick={handleExportarGiroDocx}
+                  disabled={!mercadoId || baixandoRelatorioGiro}
+                  data-testid="button-exportar-giro-docx">
+                  <Download className="h-4 w-4" />
+                  {baixandoRelatorioGiro ? 'Gerando...' : 'Baixar relatório (.docx)'}
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="overflow-x-auto">
               <TabelaProdutos
@@ -416,6 +523,8 @@ export default function PainelSugestaoPage() {
                 mensagemVazia="Nenhum item registrado neste ciclo ainda — preencha a Qtd. a pedir na aba Estoque e Sugestão pra ele aparecer aqui."
                 onAbrirProduto={setProdutoSelecionado}
                 onDefinirPedido={handleDefinirPedido}
+                onAlterarUnidade={handleAlterarUnidadePedido}
+                unidadesPedido={unidadesPedido}
                 pedidosVersion={pedidosVersion}
               />
             </CardContent>
@@ -458,14 +567,6 @@ export default function PainelSugestaoPage() {
           </Card>
         </TabsContent>
       </Tabs>
-
-      {/* Download do "frutap.json" atualizado — backup/portabilidade real */}
-      <div className="mt-6">
-        <Button variant="outline" className="gap-2" onClick={() => exportarEstoqueJson()} data-testid="button-exportar-json">
-          <Download className="h-4 w-4" />
-          Baixar JSON do estoque (Frutap)
-        </Button>
-      </div>
 
       {/* Drill-down: histórico de saídas do produto clicado */}
       <Dialog open={produtoSelecionado !== null} onOpenChange={(open) => !open && setProdutoSelecionado(null)}>

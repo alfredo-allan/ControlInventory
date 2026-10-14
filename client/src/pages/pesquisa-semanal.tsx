@@ -56,6 +56,13 @@ export default function PesquisaSemanalPage() {
   const [mercadoId, setMercadoId] = useState<string>('')
   const [contagens, setContagens] = useState<Record<string, number>>({})
   const [precos, setPrecos] = useState<Record<string, number>>({})
+  // Unidade/Caixa por item NESTA contagem — pedido do usuário (2026-10-14):
+  // antes era só um rótulo herdado do catálogo, sem poder mudar por aqui.
+  // Default vem do catálogo (`produto.unidade`), mas o operador pode trocar
+  // pontualmente pra essa contagem (ex.: contou em caixas fechadas dessa
+  // vez) — o valor escolhido aqui é o que vai no payload de sync
+  // (`quantityType`), não altera o cadastro do produto no catálogo.
+  const [unidadesSelecionadas, setUnidadesSelecionadas] = useState<Record<string, 'unidade' | 'caixa'>>({})
   // 'salvando' por ~350ms e depois 'salvo' por ~900ms ao perder o foco do
   // campo de preço — feedback puramente perceptual (o salvamento local em
   // si é síncrono/instantâneo), pra dar certeza visual de que o blur
@@ -138,6 +145,7 @@ export default function PesquisaSemanalPage() {
     })
     setContagens(baseContagens)
     setPrecos(basePrecos)
+    setUnidadesSelecionadas({})
   }, [mercadoId, produtos])
 
   // Troca de mercado limpa o "foco" do scanner — mas só a troca de mercado:
@@ -171,14 +179,18 @@ export default function PesquisaSemanalPage() {
         quantidadeContada,
         divergencia,
         divergenciaGrande,
-        // Unidade já é um atributo do produto no catálogo (definido no
-        // cadastro, Registrar Produto) — a contagem semanal só herda e
-        // mostra, não deixa escolher de novo (senão um mesmo produto
-        // podia virar "caixa" numa semana e "unidade" na outra).
-        unidade: produto.unidade
+        // Unidade parte do catálogo (definido no cadastro, Registrar
+        // Produto) como padrão, mas é editável por item NESTA contagem
+        // (seletor na linha, ver render abaixo) — permite contar em caixa
+        // numa semana e unidade noutra, sem mudar o cadastro do produto.
+        unidade: unidadesSelecionadas[codigoEAN] ?? produto.unidade
       }
     })
-  }, [produtos, contagens])
+  }, [produtos, contagens, unidadesSelecionadas])
+
+  const alterarUnidade = (codigoEAN: string, unidade: 'unidade' | 'caixa') => {
+    setUnidadesSelecionadas((atual) => ({ ...atual, [codigoEAN]: unidade }))
+  }
 
   // Catálogo inteiro aparece pra qualquer mercado agora (fix do travamento
   // antigo) — com a busca o operador acha o item rápido mesmo com o catálogo
@@ -461,8 +473,22 @@ export default function PesquisaSemanalPage() {
                   <p className="font-medium text-foreground truncate">{item.descricao}</p>
                   <p className="text-xs text-muted-foreground font-mono">{item.codigoEAN}</p>
                 </div>
-                <div className="text-xs text-muted-foreground shrink-0">
-                  Esperado: {item.quantidadeEsperada} {item.unidade === 'caixa' ? 'cx' : 'un'}
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
+                  <span>Esperado: {item.quantidadeEsperada}</span>
+                  {/* Unidade/Caixa editável por item nesta contagem — pedido
+                      do usuário (2026-10-14): antes era só texto fixo
+                      herdado do catálogo. */}
+                  <Select value={item.unidade} onValueChange={(v) => alterarUnidade(item.codigoEAN, v as 'unidade' | 'caixa')}>
+                    <SelectTrigger
+                      className="h-6 w-[4.25rem] px-1.5 text-xs gap-1"
+                      data-testid={`select-unidade-${item.codigoEAN}`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unidade">un</SelectItem>
+                      <SelectItem value="caixa">cx</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 {/* Stepper horizontal (-  valor  +) com botões de 36px — o

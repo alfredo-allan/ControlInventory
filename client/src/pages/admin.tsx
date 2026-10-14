@@ -21,6 +21,7 @@ import {
   ArrowRightLeft,
   ClipboardList,
   PackageX,
+  PackageSearch,
   KeyRound,
   UserX,
   UserCheck
@@ -71,7 +72,7 @@ interface UsuarioItem {
 // por isso quase tudo é opcional aqui; `descreverEvento` abaixo sabe o que
 // cada tipo realmente usa.
 interface EventoAtividade {
-  tipo: 'produto_registrado' | 'movimentacao' | 'pesquisa_semanal' | 'avaria'
+  tipo: 'produto_registrado' | 'movimentacao' | 'pesquisa_semanal' | 'avaria' | 'pedido_quantidade'
   data: string | null
   descricao?: string
   codigoEAN?: string
@@ -81,6 +82,10 @@ interface EventoAtividade {
   motivo?: string
   cicloId?: string
   quantidadeItens?: number
+  quantityType?: 'unidade' | 'caixa'
+  // Presente em toda visão consolidada (sem filtro de operador) — mostra
+  // de quem é cada linha, já que a lista passa a misturar todo mundo.
+  operador?: string | null
 }
 
 // Ícone + texto de cada tipo de evento — fora do componente porque é pura
@@ -111,6 +116,14 @@ function descreverEvento(evento: EventoAtividade): { Icon: typeof Barcode; rotul
         rotulo: 'Registrou uma avaria',
         detalhe: `${evento.descricao || evento.codigoEAN || 'Produto'} · qtd ${evento.quantidade ?? '—'}${evento.motivo ? ` · ${evento.motivo}` : ''}`
       }
+    case 'pedido_quantidade': {
+      const unidade = evento.quantityType === 'caixa' ? 'cx' : 'un'
+      return {
+        Icon: PackageSearch,
+        rotulo: 'Definiu Qtd. a pedir (Giro Registrado)',
+        detalhe: `${evento.descricao || evento.codigoEAN || 'Produto'} · ${evento.quantidade ?? '—'} ${unidade}${evento.cicloId ? ` · ciclo ${evento.cicloId}` : ''}${evento.mercado ? ` · ${evento.mercado}` : ''}`
+      }
+    }
     default:
       return { Icon: Activity, rotulo: 'Evento', detalhe: '' }
   }
@@ -127,6 +140,11 @@ const criarUsuarioSchema = z.object({
   perfil: z.enum(['operador', 'admin'])
 })
 type CriarUsuarioValues = z.infer<typeof criarUsuarioSchema>
+
+// Sentinela pro valor "Todos os operadores" do seletor — não pode ser ''
+// porque '' já significa "nada escolhido ainda" (esconde a lista inteira).
+const TODOS_OPERADORES = '__todos__'
+const TODOS_MERCADOS = '__todos__'
 
 // Frase que o backend exige literalmente no corpo de POST
 // /api/admin/logs/limpar ({"confirmar": "LIMPAR"}) — pedir a mesma frase
@@ -176,6 +194,12 @@ export default function AdminPage() {
   const [eventosOperador, setEventosOperador] = useState<EventoAtividade[]>([])
   const [carregandoEventos, setCarregandoEventos] = useState(false)
   const [erroEventos, setErroEventos] = useState<string | null>(null)
+  // Filtros extras da visão consolidada (2026-10-14, PDF "Questionamento
+  // Técnico", seção 1) — mercado e período, somados ao operador acima.
+  const [mercadosFiltro, setMercadosFiltro] = useState<{ id: string; nome: string }[]>([])
+  const [mercadoSelecionado, setMercadoSelecionado] = useState(TODOS_MERCADOS)
+  const [periodoInicio, setPeriodoInicio] = useState('')
+  const [periodoFim, setPeriodoFim] = useState('')
 
   const formUsuario = useForm<CriarUsuarioValues>({
     resolver: zodResolver(criarUsuarioSchema),
@@ -314,11 +338,31 @@ export default function AdminPage() {
     }
   }
 
-  const carregarAtividadeOperador = async (operador: string) => {
+  const carregarMercadosFiltro = async () => {
+    try {
+      const resposta = await apiFetch('/api/mercados')
+      if (!resposta.ok) return
+      const corpo = (await resposta.json()) as { id: string; nome: string }[]
+      setMercadosFiltro(corpo)
+    } catch {
+      // Filtro de mercado é um extra — se falhar, a tela ainda funciona só
+      // com operador, sem travar a seção inteira por causa disso.
+    }
+  }
+
+  // Monta a query combinando os 3 filtros (operador, mercado, período) —
+  // todos opcionais. `operador` só entra se não for o sentinela "todos".
+  const carregarAtividade = async (opts: { operador: string; mercado: string; inicio: string; fim: string }) => {
     setCarregandoEventos(true)
     setErroEventos(null)
     try {
-      const resposta = await apiFetch(`/api/admin/atividade-operador?operador=${encodeURIComponent(operador)}`)
+      const params = new URLSearchParams()
+      if (opts.operador && opts.operador !== TODOS_OPERADORES) params.set('operador', opts.operador)
+      if (opts.mercado && opts.mercado !== TODOS_MERCADOS) params.set('mercado', opts.mercado)
+      if (opts.inicio) params.set('inicio', opts.inicio)
+      if (opts.fim) params.set('fim', opts.fim)
+
+      const resposta = await apiFetch(`/api/admin/atividade-operador?${params}`)
       if (resposta.status === 403) {
         setErroEventos('Acesso negado — apenas administradores veem essa atividade.')
         return
@@ -338,7 +382,18 @@ export default function AdminPage() {
 
   const onSelecionarOperador = (operador: string) => {
     setOperadorSelecionado(operador)
-    void carregarAtividadeOperador(operador)
+    void carregarAtividade({ operador, mercado: mercadoSelecionado, inicio: periodoInicio, fim: periodoFim })
+  }
+
+  const onMudarMercadoFiltro = (mercado: string) => {
+    setMercadoSelecionado(mercado)
+    if (operadorSelecionado) void carregarAtividade({ operador: operadorSelecionado, mercado, inicio: periodoInicio, fim: periodoFim })
+  }
+
+  const onAplicarPeriodo = () => {
+    if (operadorSelecionado) {
+      void carregarAtividade({ operador: operadorSelecionado, mercado: mercadoSelecionado, inicio: periodoInicio, fim: periodoFim })
+    }
   }
 
   const carregarLogins = async () => {
@@ -367,6 +422,7 @@ export default function AdminPage() {
       void carregarLogins()
       void carregarUsuarios()
       void carregarOperadores()
+      void carregarMercadosFiltro()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -516,8 +572,10 @@ export default function AdminPage() {
             Atividade por operador
           </CardTitle>
           <CardDescription>
-            Tudo que um operador registrou, em ordem — produtos, movimentações, pesquisas semanais fechadas e
-            avarias. O nome vem do Setup Rápido de cada aparelho, não necessariamente do usuário de login.
+            Tudo que foi registrado, em ordem — produtos, movimentações, pesquisas semanais fechadas, avarias e
+            giro registrado ("Qtd. a pedir"). O nome do operador vem do Setup Rápido de cada aparelho, não
+            necessariamente do usuário de login. Escolha "Todos os operadores" pra ver o consolidado de todo
+            mundo de uma vez, e filtre por mercado e/ou período se precisar estreitar.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -528,21 +586,56 @@ export default function AdminPage() {
             </div>
           ) : erroOperadores ? (
             <p className="text-sm text-destructive py-2">{erroOperadores}</p>
-          ) : operadores.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-2">Nenhum operador com registros ainda.</p>
           ) : (
-            <Select value={operadorSelecionado} onValueChange={onSelecionarOperador}>
-              <SelectTrigger className="w-full sm:w-[280px]" data-testid="select-operador-atividade">
-                <SelectValue placeholder="Escolha um operador..." />
-              </SelectTrigger>
-              <SelectContent>
-                {operadores.map((nome) => (
-                  <SelectItem key={nome} value={nome}>
-                    {nome}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex flex-col sm:flex-row flex-wrap gap-2">
+              <Select value={operadorSelecionado} onValueChange={onSelecionarOperador}>
+                <SelectTrigger className="w-full sm:w-[240px]" data-testid="select-operador-atividade">
+                  <SelectValue placeholder="Escolha um operador..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={TODOS_OPERADORES}>Todos os operadores</SelectItem>
+                  {operadores.map((nome) => (
+                    <SelectItem key={nome} value={nome}>
+                      {nome}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={mercadoSelecionado} onValueChange={onMudarMercadoFiltro}>
+                <SelectTrigger className="w-full sm:w-[220px]" data-testid="select-mercado-atividade">
+                  <SelectValue placeholder="Todos os mercados" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={TODOS_MERCADOS}>Todos os mercados</SelectItem>
+                  {mercadosFiltro.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.nome}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <div className="flex items-center gap-1.5">
+                <Input
+                  type="date"
+                  value={periodoInicio}
+                  onChange={(e) => setPeriodoInicio(e.target.value)}
+                  onBlur={onAplicarPeriodo}
+                  className="w-[150px]"
+                  data-testid="input-periodo-inicio-atividade"
+                />
+                <span className="text-muted-foreground text-sm">até</span>
+                <Input
+                  type="date"
+                  value={periodoFim}
+                  onChange={(e) => setPeriodoFim(e.target.value)}
+                  onBlur={onAplicarPeriodo}
+                  className="w-[150px]"
+                  data-testid="input-periodo-fim-atividade"
+                />
+              </div>
+            </div>
           )}
 
           {operadorSelecionado &&
@@ -555,7 +648,9 @@ export default function AdminPage() {
               <p className="text-sm text-destructive py-4 text-center">{erroEventos}</p>
             ) : eventosOperador.length === 0 ? (
               <p className="text-sm text-muted-foreground py-4 text-center">
-                Nenhum registro encontrado para "{operadorSelecionado}".
+                {operadorSelecionado === TODOS_OPERADORES
+                  ? 'Nenhum registro encontrado com esses filtros.'
+                  : `Nenhum registro encontrado para "${operadorSelecionado}".`}
               </p>
             ) : (
               <div className="space-y-2 max-h-[28rem] overflow-y-auto" data-testid="lista-atividade-operador">
@@ -569,7 +664,12 @@ export default function AdminPage() {
                       <Icon className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="font-medium text-foreground">{rotulo}</span>
+                          <span className="font-medium text-foreground">
+                            {rotulo}
+                            {operadorSelecionado === TODOS_OPERADORES && evento.operador && (
+                              <span className="font-normal text-muted-foreground"> · {evento.operador}</span>
+                            )}
+                          </span>
                           <span className="text-muted-foreground text-xs shrink-0">
                             {evento.data ? format(parseISO(evento.data), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR }) : '—'}
                           </span>

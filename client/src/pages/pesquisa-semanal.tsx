@@ -477,10 +477,13 @@ export default function PesquisaSemanalPage() {
                   <span>Esperado: {item.quantidadeEsperada}</span>
                   {/* Unidade/Caixa editável por item nesta contagem — pedido
                       do usuário (2026-10-14): antes era só texto fixo
-                      herdado do catálogo. */}
+                      herdado do catálogo. Tamanho igual aos outros campos da
+                      linha (mesma altura/largura do botão de Preço, h-9 w-28)
+                      — no mobile ficava pequeno demais perto dos demais
+                      controles. Feedback do usuário (2026-10-14). */}
                   <Select value={item.unidade} onValueChange={(v) => alterarUnidade(item.codigoEAN, v as 'unidade' | 'caixa')}>
                     <SelectTrigger
-                      className="h-6 w-[4.25rem] px-1.5 text-xs gap-1"
+                      className="h-9 w-28 text-sm"
                       data-testid={`select-unidade-${item.codigoEAN}`}>
                       <SelectValue />
                     </SelectTrigger>

@@ -63,6 +63,14 @@ export default function PesquisaSemanalPage() {
   // vez) — o valor escolhido aqui é o que vai no payload de sync
   // (`quantityType`), não altera o cadastro do produto no catálogo.
   const [unidadesSelecionadas, setUnidadesSelecionadas] = useState<Record<string, 'unidade' | 'caixa'>>({})
+  // "Conferido" — selo visual que o operador clica depois de revisar um
+  // item. O campo de quantidade já salva sozinho ao perder o foco (não
+  // precisa clicar em nada pra persistir), mas esse clique explícito cria
+  // o hábito de "fechar" cada item um a um, reduzindo erro de preenchimento
+  // por item pulado sem querer. É só um estado visual local — não manda
+  // nada pro servidor nem muda o payload de sync. Pedido do usuário
+  // (2026-10-14).
+  const [itensConferidos, setItensConferidos] = useState<Record<string, boolean>>({})
   // 'salvando' por ~350ms e depois 'salvo' por ~900ms ao perder o foco do
   // campo de preço — feedback puramente perceptual (o salvamento local em
   // si é síncrono/instantâneo), pra dar certeza visual de que o blur
@@ -146,7 +154,12 @@ export default function PesquisaSemanalPage() {
     setContagens(baseContagens)
     setPrecos(basePrecos)
     setUnidadesSelecionadas({})
+    setItensConferidos({})
   }, [mercadoId, produtos])
+
+  const alternarConferido = (codigoEAN: string) => {
+    setItensConferidos((atual) => ({ ...atual, [codigoEAN]: !atual[codigoEAN] }))
+  }
 
   // Troca de mercado limpa o "foco" do scanner — mas só a troca de mercado:
   // isso roda separado do efeito acima pra não apagar o item recém-escaneado
@@ -461,14 +474,37 @@ export default function PesquisaSemanalPage() {
               {grupo.itens.map((item) => {
             const precoAtual = precos[item.codigoEAN] ?? 0
             const precoVisivel = precoVisivelEAN.has(item.codigoEAN)
+            const conferido = itensConferidos[item.codigoEAN] ?? false
 
             return (
               <div
                 key={item.codigoEAN}
                 className={cn(
-                  'flex flex-col sm:flex-row sm:items-center gap-3 rounded-lg border px-4 py-3 transition-colors',
-                  item.codigoEAN === itemEmFocoEAN && 'border-primary ring-2 ring-primary/20'
+                  'relative flex flex-col sm:flex-row sm:items-center gap-3 rounded-lg border px-4 py-3 transition-colors',
+                  item.codigoEAN === itemEmFocoEAN && 'border-primary ring-2 ring-primary/20',
+                  conferido && 'border-primary/40'
                 )}>
+                {/* Selo "conferido" — clique explícito do operador depois de
+                    revisar o item. O campo de quantidade já salva sozinho ao
+                    perder o foco; esse selo não muda nada no banco nem no
+                    payload de sync, é só pra criar o hábito de "fechar" cada
+                    item um a um e reduzir item pulado sem querer. Canto
+                    superior esquerdo do card, sobrepondo a borda — pedido do
+                    usuário (2026-10-14). */}
+                <button
+                  type="button"
+                  onClick={() => alternarConferido(item.codigoEAN)}
+                  aria-pressed={conferido}
+                  aria-label={conferido ? 'Desmarcar item conferido' : 'Marcar item como conferido'}
+                  data-testid={`button-conferido-${item.codigoEAN}`}
+                  className={cn(
+                    'absolute -top-2.5 -left-2.5 z-10 flex h-6 w-6 items-center justify-center rounded-full border-2 bg-background transition-all hover:scale-110 active:scale-95',
+                    conferido
+                      ? 'border-primary bg-primary text-primary-foreground shadow-sm'
+                      : 'border-muted-foreground/30 text-muted-foreground/0 hover:border-primary/50'
+                  )}>
+                  {conferido && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
+                </button>
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-foreground truncate">{item.descricao}</p>
                   <p className="text-xs text-muted-foreground font-mono">{item.codigoEAN}</p>

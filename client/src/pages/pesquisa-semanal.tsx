@@ -14,7 +14,8 @@ import {
   Loader2,
   Check,
   ArrowUp,
-  Save
+  Save,
+  X
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -46,6 +47,14 @@ import { puxarDoServidor } from '@/lib/pullSync'
 import { agruparPorCategoria } from '@/lib/categorias'
 
 const formatarPreco = (valor: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor)
+
+// Prefixo padrão dos códigos EAN da Frutap (fornecedor de hoje) — todo
+// produto do catálogo começa com "7896862". Pré-preenche a busca com isso
+// pra digitar EAN na mão no celular ficar rápido (só falta completar os 6
+// dígitos finais, não os 13 inteiros). Se amanhã entrar outro fornecedor
+// com prefixo diferente, isso vira uma lista de regras por empresa — por
+// enquanto é só essa constante mesmo. Pedido do usuário (2026-10-14).
+const PREFIXO_EAN_FRUTAP = '7896862'
 
 export default function PesquisaSemanalPage() {
   const { toast } = useToast()
@@ -80,7 +89,10 @@ export default function PesquisaSemanalPage() {
   const [mostrarConfirmacao, setMostrarConfirmacao] = useState(false)
   const [mostrarAdicionarProduto, setMostrarAdicionarProduto] = useState(false)
   const [novoProduto, setNovoProduto] = useState({ codigoEAN: '', descricao: '', quantidadeInicial: 0 })
-  const [busca, setBusca] = useState('')
+  // Já começa com o prefixo padrão da Frutap preenchido (ver
+  // PREFIXO_EAN_FRUTAP acima) — o operador só completa os 6 dígitos finais
+  // do EAN pra buscar. Pedido do usuário (2026-10-14).
+  const [busca, setBusca] = useState(PREFIXO_EAN_FRUTAP)
   // Incrementado sempre que a lista de produtos do mercado precisa ser
   // relida do storage (ex.: depois de cadastrar um produto novo).
   const [refreshKey, setRefreshKey] = useState(0)
@@ -91,6 +103,14 @@ export default function PesquisaSemanalPage() {
   const [itemEmFocoEAN, setItemEmFocoEAN] = useState<string | null>(null)
   const [precoVisivelEAN, setPrecoVisivelEAN] = useState<Set<string>>(new Set())
   const quantidadeInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
+  // Guarda o último EAN em que o foco já foi efetivamente aplicado — sem
+  // isso, o efeito de foco abaixo (que depende de `itensFiltrados` pra
+  // tentar de novo quando o DOM ainda não tinha o item renderizado) disparava
+  // a CADA letra digitada na busca manual, porque toda tecla muda
+  // `itensFiltrados` e o `itemEmFocoEAN` de um escaneamento antigo continuava
+  // setado — isso ficava roubando o foco do campo de busca no meio da
+  // digitação. Bug relatado pelo usuário (2026-10-14).
+  const ultimoFocoAplicadoRef = useRef<string | null>(null)
 
   // Botão flutuante de "voltar ao topo" — aparece só depois de rolar um
   // pouco, pra não poluir a tela logo de cara (2026-10-14, documento de
@@ -168,6 +188,8 @@ export default function PesquisaSemanalPage() {
   useEffect(() => {
     setPrecoVisivelEAN(new Set())
     setItemEmFocoEAN(null)
+    setBusca(PREFIXO_EAN_FRUTAP)
+    ultimoFocoAplicadoRef.current = null
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mercadoId])
 
@@ -266,12 +288,17 @@ export default function PesquisaSemanalPage() {
     }, 350)
   }
 
-  // Scanner de câmera: ao ler um EAN, procura o produto no catálogo (que já
-  // é global — aparece pra qualquer mercado) e foca direto no campo de
-  // quantidade dele, revelando também o campo de preço pra preencher em
-  // seguida. Se o EAN não existir em lugar nenhum, abre o cadastro já com o
-  // código preenchido, em vez de simplesmente dizer "não encontrado".
-  const handleCodigoLido = (codigoEAN: string) => {
+  // Núcleo comum de "achou um EAN completo, o que fazer" — usado tanto pelo
+  // scanner de câmera quanto pela digitação manual do EAN completo na busca
+  // (ver efeito abaixo). Procura o produto no catálogo (que já é global —
+  // aparece pra qualquer mercado) e foca direto no campo de quantidade dele,
+  // revelando também o campo de preço pra preencher em seguida. Se o EAN não
+  // existir em lugar nenhum, abre o cadastro já com o código preenchido, em
+  // vez de simplesmente dizer "não encontrado". `buscaDepois` é o que fica
+  // no campo de busca depois de processar — o scanner limpa tudo ('') pra
+  // mostrar o catálogo inteiro de novo, já a digitação manual volta pro
+  // prefixo padrão (ver PREFIXO_EAN_FRUTAP), pronta pro próximo código.
+  const processarCodigoEncontrado = (codigoEAN: string, buscaDepois: string) => {
     const encontrado = produtos.find((p) => p.codigoEAN === codigoEAN)
 
     if (!encontrado) {
@@ -281,17 +308,33 @@ export default function PesquisaSemanalPage() {
       })
       setNovoProduto((n) => ({ ...n, codigoEAN }))
       setMostrarAdicionarProduto(true)
+      setBusca(buscaDepois)
       return
     }
 
-    setBusca('')
+    setBusca(buscaDepois)
     setPrecoVisivelEAN((atual) => new Set(atual).add(codigoEAN))
     setItemEmFocoEAN(codigoEAN)
 
     toast({ title: 'Produto encontrado!', description: encontrado.produto.descricao })
   }
 
+  const handleCodigoLido = (codigoEAN: string) => processarCodigoEncontrado(codigoEAN, '')
+
   const { showScanner, setShowScanner, openScanner, handleScan, handleScanError } = useBarcodeScanner(handleCodigoLido)
+
+  // Digitação manual do EAN na busca (sem usar o scanner): assim que os 13
+  // dígitos de um EAN padrão estiverem completos, já busca e foca o produto
+  // certo sozinho — sem isso, o operador tinha que digitar o código inteiro
+  // e depois ainda ir caçar o item na lista filtrada. Só dispara com 13
+  // dígitos NUMÉRICOS (não em qualquer busca por nome de 13 caracteres).
+  // Pedido do usuário (2026-10-14).
+  useEffect(() => {
+    const termo = busca.trim()
+    if (termo.length !== 13 || !/^\d{13}$/.test(termo)) return
+    processarCodigoEncontrado(termo, PREFIXO_EAN_FRUTAP)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busca])
 
   // Depois que o item escaneado aparece na lista (pode precisar de um render
   // a mais quando a busca acabou de ser limpa), rola até ele e foca a
@@ -299,11 +342,18 @@ export default function PesquisaSemanalPage() {
   // operador digitando a quantidade na hora.
   useEffect(() => {
     if (!itemEmFocoEAN) return
+    // Já aplicou o foco nesse EAN antes — não repete. Sem essa trava, como
+    // esse efeito também depende de `itensFiltrados` (de propósito, pra
+    // tentar de novo se o DOM ainda não tinha o item), ele disparava de novo
+    // a cada tecla digitada na busca manual (que muda `itensFiltrados` a
+    // cada letra) e roubava o foco do campo de busca no meio da digitação.
+    if (ultimoFocoAplicadoRef.current === itemEmFocoEAN) return
     const input = quantidadeInputRefs.current[itemEmFocoEAN]
     if (input) {
       input.scrollIntoView({ behavior: 'smooth', block: 'center' })
       input.focus()
       input.select()
+      ultimoFocoAplicadoRef.current = itemEmFocoEAN
     }
   }, [itemEmFocoEAN, itensFiltrados])
 
@@ -447,11 +497,24 @@ export default function PesquisaSemanalPage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Buscar produto por nome ou EAN..."
-                className="pl-10"
+                className="pl-10 pr-9"
                 value={busca}
                 onChange={(e) => setBusca(e.target.value)}
                 data-testid="input-busca-produto"
               />
+              {/* Campo já vem com o prefixo da Frutap preenchido (ver
+                  PREFIXO_EAN_FRUTAP) — esse X é o jeito rápido de esvaziar
+                  tudo pra buscar por nome ou ver o catálogo inteiro. */}
+              {busca && (
+                <button
+                  type="button"
+                  onClick={() => setBusca('')}
+                  aria-label="Limpar busca"
+                  data-testid="button-limpar-busca"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                  <X className="h-4 w-4" />
+                </button>
+              )}
             </div>
           </div>
 

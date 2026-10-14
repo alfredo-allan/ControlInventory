@@ -596,8 +596,13 @@ export default function PesquisaSemanalPage() {
                 {/* Stepper horizontal (-  valor  +) com botões de 36px — o
                     design anterior (setas empilhadas de 17px de altura) era
                     preciso demais pra mouse e quase impossível de acertar
-                    com o dedo no mobile. Feedback do usuário (2026-10-13). */}
-                <div className="flex items-stretch rounded-md border border-input bg-background shrink-0 overflow-hidden">
+                    com o dedo no mobile. Feedback do usuário (2026-10-13).
+                    Largura fixa w-28 — mesmo padrão dos outros campos da
+                    linha (Unidade/Caixa e Preço, também w-28): sem isso, no
+                    mobile (onde os campos empilham em coluna) esse container
+                    esticava pra ocupar a linha inteira, bem maior que os
+                    outros. Feedback do usuário (2026-10-14). */}
+                <div className="flex items-stretch rounded-md border border-input bg-background shrink-0 overflow-hidden w-28">
                   <button
                     type="button"
                     aria-label="Diminuir quantidade"
@@ -609,7 +614,7 @@ export default function PesquisaSemanalPage() {
                     type="number"
                     min="0"
                     inputMode="numeric"
-                    className="w-12 border-0 border-x border-input rounded-none text-center px-1 focus-visible:ring-0 focus-visible:ring-offset-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    className="w-auto min-w-0 flex-1 border-0 border-x border-input rounded-none text-center px-1 focus-visible:ring-0 focus-visible:ring-offset-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     value={contagens[item.codigoEAN] ?? 0}
                     onChange={(e) =>
                       setContagens((atual) => ({ ...atual, [item.codigoEAN]: Math.max(0, parseInt(e.target.value, 10) || 0) }))

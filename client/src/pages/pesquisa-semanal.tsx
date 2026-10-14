@@ -12,7 +12,9 @@ import {
   Camera,
   DollarSign,
   Loader2,
-  Check
+  Check,
+  ArrowUp,
+  Save
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -41,6 +43,7 @@ import {
   getCicloIdAtual
 } from '@/lib/estoqueStorage'
 import { puxarDoServidor } from '@/lib/pullSync'
+import { agruparPorCategoria } from '@/lib/categorias'
 
 const formatarPreco = (valor: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor)
 
@@ -73,6 +76,17 @@ export default function PesquisaSemanalPage() {
   const [itemEmFocoEAN, setItemEmFocoEAN] = useState<string | null>(null)
   const [precoVisivelEAN, setPrecoVisivelEAN] = useState<Set<string>>(new Set())
   const quantidadeInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
+
+  // Botão flutuante de "voltar ao topo" — aparece só depois de rolar um
+  // pouco, pra não poluir a tela logo de cara (2026-10-14, documento de
+  // escopo: lista extensa dificulta o retorno ao topo).
+  const [mostrarVoltarTopo, setMostrarVoltarTopo] = useState(false)
+  useEffect(() => {
+    const aoRolar = () => setMostrarVoltarTopo(window.scrollY > 400)
+    window.addEventListener('scroll', aoRolar, { passive: true })
+    return () => window.removeEventListener('scroll', aoRolar)
+  }, [])
+  const voltarAoTopo = () => window.scrollTo({ top: 0, behavior: 'smooth' })
 
   // Ao montar: se o Setup Rápido tem um mercado configurado, já usa ele —
   // criando o mercado no estoque na hora, se ainda não existir por lá.
@@ -182,6 +196,13 @@ export default function PesquisaSemanalPage() {
   // mudou importa aqui; o resto é resumido num contador.
   const itensAlterados = useMemo(() => itensComDivergencia.filter((item) => item.divergencia !== 0), [itensComDivergencia])
   const quantidadeInalterados = itensComDivergencia.length - itensAlterados.length
+
+  // Agrupamento sequencial por categoria (2026-10-14, documento de escopo,
+  // item 1.3) — Iogurte, Leite Fermentado e Bebida Láctea primeiro (nessa
+  // ordem), resto em "Outros produtos". Ver client/src/lib/categorias.ts
+  // pro porquê de ser por palavra-chave na descrição, não pelo campo
+  // `categoria` do catálogo (que está vazio).
+  const gruposFiltrados = useMemo(() => agruparPorCategoria(itensFiltrados), [itensFiltrados])
 
   const ajustarContagem = (codigoEAN: string, delta: number) => {
     setContagens((atual) => ({ ...atual, [codigoEAN]: Math.max(0, (atual[codigoEAN] ?? 0) + delta) }))
@@ -331,15 +352,30 @@ export default function PesquisaSemanalPage() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-4xl">
-      <div className="mb-8">
-        <h1 className="text-3xl font-semibold text-foreground mb-2 flex items-center gap-2">
-          <ClipboardList className="h-7 w-7 text-primary" />
-          Pesquisa Semanal
-        </h1>
-        <p className="text-muted-foreground">
-          Conte o que está na prateleira. Ciclo atual: <span className="font-medium text-foreground">{cicloAtual}</span>
-        </p>
+    <div className="container mx-auto px-4 py-8 pb-28 max-w-4xl">
+      <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h1 className="text-3xl font-semibold text-foreground mb-2 flex items-center gap-2">
+            <ClipboardList className="h-7 w-7 text-primary" />
+            Pesquisa Semanal
+          </h1>
+          <p className="text-muted-foreground">
+            Conte o que está na prateleira. Ciclo atual: <span className="font-medium text-foreground">{cicloAtual}</span>
+          </p>
+        </div>
+        {/* Duplicata da ação principal no topo — numa lista longa, o
+            operador não deveria precisar rolar até o fim só pra fechar a
+            pesquisa. Documento de escopo (2026-10-14), item 1.1. */}
+        <Button
+          type="button"
+          variant="outline"
+          className="gap-2 shrink-0"
+          disabled={produtos.length === 0}
+          onClick={() => setMostrarConfirmacao(true)}
+          data-testid="button-revisar-pesquisa-topo">
+          <Save className="h-4 w-4" />
+          Revisar e Fechar Pesquisa
+        </Button>
       </div>
 
       {pesquisaDoCiclo && (
@@ -400,7 +436,17 @@ export default function PesquisaSemanalPage() {
             </p>
           )}
 
-          {itensFiltrados.map((item) => {
+          {gruposFiltrados.map((grupo) => (
+            <div key={grupo.categoria} className="space-y-3">
+              {/* Cabeçalho de categoria — só aparece se houver mais de um
+                  grupo na visão atual (evita um título solto quando a busca
+                  já filtrou pra uma categoria só). */}
+              {gruposFiltrados.length > 1 && (
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide pt-2 first:pt-0">
+                  {grupo.categoria}
+                </h3>
+              )}
+              {grupo.itens.map((item) => {
             const precoAtual = precos[item.codigoEAN] ?? 0
             const precoVisivel = precoVisivelEAN.has(item.codigoEAN)
 
@@ -440,6 +486,12 @@ export default function PesquisaSemanalPage() {
                     onChange={(e) =>
                       setContagens((atual) => ({ ...atual, [item.codigoEAN]: Math.max(0, parseInt(e.target.value, 10) || 0) }))
                     }
+                    // Seleciona o texto ao focar — sem isso, tocar no campo
+                    // (que já vem preenchido com o estoque esperado, de
+                    // propósito) e digitar "2" virava "02" ou "20" em vez
+                    // de substituir o "0"/valor anterior. Documento de
+                    // escopo (2026-10-14), item 1.4.
+                    onFocus={(e) => e.target.select()}
                     ref={(el) => {
                       quantidadeInputRefs.current[item.codigoEAN] = el
                     }}
@@ -473,6 +525,7 @@ export default function PesquisaSemanalPage() {
                       className="pl-8 pr-7 text-right"
                       value={precos[item.codigoEAN] !== undefined ? formatarCentavos(precos[item.codigoEAN]) : ''}
                       onChange={(e) => atualizarPreco(item.codigoEAN, e.target.value)}
+                      onFocus={(e) => e.target.select()}
                       onBlur={() => persistirPreco(item.codigoEAN)}
                       data-testid={`input-preco-${item.codigoEAN}`}
                     />
@@ -503,7 +556,9 @@ export default function PesquisaSemanalPage() {
                 )}
               </div>
             )
-          })}
+              })}
+            </div>
+          ))}
 
           <Button type="button" variant="outline" className="gap-2" onClick={() => setMostrarAdicionarProduto(true)}>
             <PackagePlus className="h-4 w-4" />
@@ -512,14 +567,37 @@ export default function PesquisaSemanalPage() {
         </CardContent>
       </Card>
 
-      <Button
-        className="w-full mt-6 gap-2"
-        size="lg"
-        disabled={produtos.length === 0}
-        onClick={() => setMostrarConfirmacao(true)}
-        data-testid="button-revisar-pesquisa">
-        Revisar e Fechar Pesquisa
-      </Button>
+      {/* Barra de ações fixa no rodapé da viewport — a ação principal fica
+          sempre alcançável, sem precisar rolar a lista inteira até o fim.
+          Documento de escopo (2026-10-14), item 1.1. pb-28 no container
+          acima garante que o conteúdo final da página não fique escondido
+          atrás dela. */}
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div className="mx-auto max-w-4xl">
+          <Button
+            className="w-full gap-2"
+            size="lg"
+            disabled={produtos.length === 0}
+            onClick={() => setMostrarConfirmacao(true)}
+            data-testid="button-revisar-pesquisa">
+            <Save className="h-4 w-4" />
+            Revisar e Fechar Pesquisa
+          </Button>
+        </div>
+      </div>
+
+      {/* Botão flutuante de voltar ao topo — bottom-24 pra ficar acima da
+          barra fixa acima, sem sobrepor. Documento de escopo, item 1.2. */}
+      {mostrarVoltarTopo && (
+        <button
+          type="button"
+          onClick={voltarAoTopo}
+          aria-label="Voltar ao topo"
+          data-testid="button-voltar-topo"
+          className="fixed right-4 bottom-24 z-40 h-11 w-11 rounded-full bg-primary text-primary-foreground shadow-lg flex items-center justify-center hover:opacity-90 transition-opacity">
+          <ArrowUp className="h-5 w-5" />
+        </button>
+      )}
 
       {/* Confirmação com as divergências antes de fechar de verdade */}
       <Dialog open={mostrarConfirmacao} onOpenChange={setMostrarConfirmacao}>
@@ -581,6 +659,7 @@ export default function PesquisaSemanalPage() {
               placeholder="Quantidade atual neste mercado"
               value={novoProduto.quantidadeInicial}
               onChange={(e) => setNovoProduto((n) => ({ ...n, quantidadeInicial: parseInt(e.target.value, 10) || 0 }))}
+              onFocus={(e) => e.target.select()}
             />
             <Button onClick={handleCadastrarProduto} className="w-full">
               Cadastrar

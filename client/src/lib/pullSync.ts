@@ -18,8 +18,8 @@
 
 import { apiFetch, ErroNaoAutenticado } from './apiClient'
 import { productStorage } from './localStorage'
-import { mergeCatalogoEMercadosFromServer, mergeSaldosFromServer, mergeAvariasFromServer } from './estoqueStorage'
-import type { RegistroAvaria } from './estoqueStorage'
+import { mergeCatalogoEMercadosFromServer, mergeSaldosFromServer, mergeAvariasFromServer, mergePedidosFromServer } from './estoqueStorage'
+import type { RegistroAvaria, PedidoItem } from './estoqueStorage'
 import type { Product } from '@shared/schema'
 
 type Ouvinte = () => void
@@ -46,11 +46,12 @@ export async function puxarDoServidor(): Promise<void> {
 
   puxando = true
   try {
-    const [produtosRegistradosResp, produtosResp, mercadosResp, avariasResp] = await Promise.all([
+    const [produtosRegistradosResp, produtosResp, mercadosResp, avariasResp, pedidosResp] = await Promise.all([
       apiFetch('/api/produtos-registrados'),
       apiFetch('/api/produtos'),
       apiFetch('/api/mercados'),
-      apiFetch('/api/avarias')
+      apiFetch('/api/avarias'),
+      apiFetch('/api/pedidos')
     ])
 
     if (produtosRegistradosResp.ok) {
@@ -61,6 +62,11 @@ export async function puxarDoServidor(): Promise<void> {
     if (avariasResp.ok) {
       const avarias = (await avariasResp.json()) as RegistroAvaria[]
       mergeAvariasFromServer(avarias)
+    }
+
+    if (pedidosResp.ok) {
+      const pedidos = (await pedidosResp.json()) as PedidoItem[]
+      mergePedidosFromServer(pedidos)
     }
 
     let mercados: { id: string; nome: string; endereco: { rua: string; bairro: string; cidade: string; estado: string } }[] = []

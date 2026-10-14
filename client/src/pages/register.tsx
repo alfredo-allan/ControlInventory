@@ -362,6 +362,15 @@ export default function RegisterPage() {
       form.reset()
       setDate(undefined)
       setProductImage('')
+      // form.reset() limpa os VALORES, mas não move o foco do teclado — o
+      // cursor ficava onde estava antes (geralmente no botão "Registrar"),
+      // então o próximo scan/EAN digitado caía no vazio e o operador
+      // precisava clicar de novo no campo manualmente antes de conseguir
+      // lançar o próximo produto. Feedback do usuário (2026-10-14):
+      // "o foco é mantido no último produto registrado, bloqueando o
+      // lançamento do novo item". requestAnimationFrame garante que o
+      // setFocus rode só depois do re-render disparado pelo reset.
+      requestAnimationFrame(() => form.setFocus('eanCode'))
     } catch (error) {
       toast({
         title: 'Erro ao registrar',

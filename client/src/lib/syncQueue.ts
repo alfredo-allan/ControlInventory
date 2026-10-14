@@ -29,6 +29,8 @@ export type TipoAcaoSync =
   | 'estoque.fecharPesquisaSemanal'
   | 'estoque.definirPreco'
   | 'avaria.registrar'
+  | 'pedido.definir'
+  | 'pedido.remover'
 
 export type StatusItemSync = 'pendente' | 'sincronizado' | 'erro'
 

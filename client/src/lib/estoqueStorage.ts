@@ -22,7 +22,7 @@ import { enfileirar } from './syncQueue'
 const STORAGE_KEY = 'estoque-data'
 const CONFIG_KEY = 'estoque-config'
 export const EMPRESA_PADRAO = 'frutap'
-const SCHEMA_VERSION = 3 as const
+const SCHEMA_VERSION = 4 as const
 
 // ---------------------------------------------------------------------------
 // Tipos
@@ -114,6 +114,23 @@ export interface RegistroAvaria {
   registradoEm: string // ISO datetime
 }
 
+// v2.12 (2026-10-14) — "Quantidade a pedir" / Giro Registrado (documento de
+// escopo do usuário, seções 3 e 4). Uma linha por produto+mercado+ciclo:
+// existir já significa "preenchido" — inclusive com quantidade=0, que é
+// como o operador marca ruptura de propósito (decisão confirmada via
+// AskUserQuestion). Diferente da sugestão calculada em tempo real
+// (`calcularSugestaoCompleta`, nunca persistida), isso aqui é o que o
+// operador de fato decidiu pedir.
+export interface PedidoItem {
+  id: string
+  mercadoId: string
+  codigoEAN: string
+  cicloId: string
+  quantidade: number
+  operador: string
+  atualizadoEm: string // ISO datetime
+}
+
 export interface EmpresaEstoque {
   nome: string
   produtos: Record<string, CatalogoProduto> // chave = codigoEAN — catálogo global
@@ -122,6 +139,7 @@ export interface EmpresaEstoque {
   movimentacoes: Movimentacao[]
   pesquisasSemanais: PesquisaSemanal[]
   avarias: RegistroAvaria[]
+  pedidos: PedidoItem[]
 }
 
 export interface EstoqueData {
@@ -178,7 +196,16 @@ const frutapCatalogo = dataFrutap as unknown as FrutapJsonV2
 // ---------------------------------------------------------------------------
 
 function criarEmpresaVazia(nome: string): EmpresaEstoque {
-  return { nome, produtos: {}, mercados: {}, estoquePorMercado: {}, movimentacoes: [], pesquisasSemanais: [], avarias: [] }
+  return {
+    nome,
+    produtos: {},
+    mercados: {},
+    estoquePorMercado: {},
+    movimentacoes: [],
+    pesquisasSemanais: [],
+    avarias: [],
+    pedidos: []
+  }
 }
 
 function seedEmpresaFrutap(data: EstoqueData): boolean {
@@ -286,6 +313,14 @@ function migrarSeNecessario(data: EstoqueData): boolean {
   for (const empresa of Object.values(data.empresas)) {
     if (!Array.isArray((empresa as EmpresaEstoque).avarias)) {
       ;(empresa as EmpresaEstoque).avarias = []
+      alterou = true
+    }
+  }
+  // v3 -> v4 (2026-10-14): mesmo padrão, agora pra `pedidos: []` — Giro
+  // Registrado / "quantidade a pedir".
+  for (const empresa of Object.values(data.empresas)) {
+    if (!Array.isArray((empresa as EmpresaEstoque).pedidos)) {
+      ;(empresa as EmpresaEstoque).pedidos = []
       alterou = true
     }
   }
@@ -848,6 +883,103 @@ export function mergeAvariasFromServer(
     porId.set(a.id, a)
   }
   empresa.avarias = Array.from(porId.values()).sort((a, b) => b.registradoEm.localeCompare(a.registradoEm))
+
+  data.empresas[empresaId] = empresa
+  salvarDataBruta(data)
+}
+
+// ---------------------------------------------------------------------------
+// "Quantidade a pedir" / Giro Registrado (2026-10-14, documento de escopo)
+// ---------------------------------------------------------------------------
+
+export function listarPedidos(mercadoId?: string, cicloId?: string, empresaId = EMPRESA_PADRAO): PedidoItem[] {
+  const pedidos = getEstoqueData().empresas[empresaId]?.pedidos ?? []
+  return pedidos.filter((p) => (!mercadoId || p.mercadoId === mercadoId) && (!cicloId || p.cicloId === cicloId))
+}
+
+// Upsert por (mercadoId, codigoEAN, cicloId) — mesma chave de negócio do
+// backend (`uq_pedido_item`). `quantidade=0` é um valor válido (ruptura
+// marcada de propósito): a linha existir já é o que significa "preenchido",
+// então salvar 0 de propósito precisa continuar gravando a linha, nunca
+// tratar isso como "vazio" e pular.
+export function definirQuantidadePedido(params: {
+  mercadoId: string
+  codigoEAN: string
+  quantidade: number
+  operador: string
+  cicloId?: string
+  empresaId?: string
+}): PedidoItem {
+  const empresaId = params.empresaId ?? EMPRESA_PADRAO
+  const cicloId = params.cicloId ?? getCicloIdAtual()
+  const data = getEstoqueData()
+  const empresa = data.empresas[empresaId] ?? criarEmpresaVazia(empresaId)
+
+  const existente = empresa.pedidos.find(
+    (p) => p.mercadoId === params.mercadoId && p.codigoEAN === params.codigoEAN && p.cicloId === cicloId
+  )
+
+  const agora = new Date().toISOString()
+  const registro: PedidoItem = existente
+    ? { ...existente, quantidade: params.quantidade, operador: params.operador, atualizadoEm: agora }
+    : {
+        id: crypto.randomUUID(),
+        mercadoId: params.mercadoId,
+        codigoEAN: params.codigoEAN,
+        cicloId,
+        quantidade: params.quantidade,
+        operador: params.operador,
+        atualizadoEm: agora
+      }
+
+  empresa.pedidos = existente
+    ? empresa.pedidos.map((p) => (p.id === existente.id ? registro : p))
+    : [...empresa.pedidos, registro]
+
+  data.empresas[empresaId] = empresa
+  salvarDataBruta(data)
+  void enfileirar('pedido.definir', { empresaId, ...registro })
+  return registro
+}
+
+// Desfaz um item do Giro Registrado — volta pro estado "não preenchido".
+export function removerQuantidadePedido(
+  mercadoId: string,
+  codigoEAN: string,
+  cicloId?: string,
+  empresaId = EMPRESA_PADRAO
+): void {
+  const cicloFinal = cicloId ?? getCicloIdAtual()
+  const data = getEstoqueData()
+  const empresa = data.empresas[empresaId]
+  if (!empresa) return
+
+  empresa.pedidos = empresa.pedidos.filter(
+    (p) => !(p.mercadoId === mercadoId && p.codigoEAN === codigoEAN && p.cicloId === cicloFinal)
+  )
+  salvarDataBruta(data)
+  void enfileirar('pedido.remover', { empresaId, mercadoId, codigoEAN, cicloId: cicloFinal })
+}
+
+// Merge pela CHAVE DE NEGÓCIO (mercado+EAN+ciclo), não por `id` — diferente
+// de avarias/pesquisas, o backend faz upsert de PedidoItem por essa chave
+// composta (ver handle_pedido_definir), então dois aparelhos que editaram o
+// mesmo item no mesmo ciclo podem ter gerado `id`s locais diferentes antes
+// de sincronizar, e convergem pra UM id só do lado do servidor. Mesclar por
+// `id` deixaria duplicata; mesclar pela chave composta e deixar o servidor
+// sempre sobrescrever segue o mesmo "último pull ganha" já aceito em
+// mergeSaldosFromServer.
+export function mergePedidosFromServer(pedidosDoServidor: PedidoItem[], empresaId = EMPRESA_PADRAO): void {
+  const data = getEstoqueData()
+  const empresa = data.empresas[empresaId]
+  if (!empresa) return
+
+  const chave = (p: PedidoItem) => `${p.mercadoId}|${p.codigoEAN}|${p.cicloId}`
+  const porChave = new Map(empresa.pedidos.map((p) => [chave(p), p]))
+  for (const p of pedidosDoServidor) {
+    porChave.set(chave(p), p)
+  }
+  empresa.pedidos = Array.from(porChave.values())
 
   data.empresas[empresaId] = empresa
   salvarDataBruta(data)
